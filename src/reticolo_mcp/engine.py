@@ -13,24 +13,48 @@ RETICOLO conventions enforced here:
 
   profil: {"heights": [...], "indices": [...]}.
     - heights[i] are z-positions of interfaces (um), typically [0, h1, ..., 0].
-    - indices[i] are 1-based texture references.
-    - indices[0] is the semi-infinite superstrate above height[0].
-    - indices[1..N-1] fill the regions between consecutive heights.
-    - The final height=0 marks the semi-infinite substrate below.
+    - indices[i] are 1-based texture references; indices[0] is the semi-infinite
+      superstrate above height[0]; the final height=0 marks the substrate.
 
   D: lattice period(s) in um — scalar for square, [Px, Py] for rectangular.
 
   nn: Fourier truncation orders [nx, ny].
+
+  polarization: parm.sym.pol =  1 → TE (electric field along y/rdir1)
+                               -1 → TM (magnetic field along y/rdir1).
+    Both polarizations read efficiencies from ef.TEinc_top_* — the 'TEinc'
+    prefix refers to the top-incident direction, not the polarization state.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
 
-from .config import MATLAB_TEMP_DIR, MAX_CONFIG_ID_LEN, MAX_ERROR_CHARS, RETICOLO_SCRATCH_DIR
-from .lease import lease_acquire, lease_release, lease_status as _lease_status
+from .config import (
+    MATLAB_TEMP_DIR,
+    MAX_CONFIG_ID_LEN,
+    MAX_ERROR_CHARS,
+    RETICOLO_SCRATCH_DIR,
+)
+from .lease import (
+    lease_acquire,
+    lease_release,
+    lease_status as _lease_status,
+)
+
+
+def _ensure_matlab() -> Any:
+    """Lazily import the matlab package. Returns the module or raises ImportError.
+
+    This is intentionally NOT a module-level import: matlab.engine may not be
+    installed yet, and even when it is, we want import safety so unit tests
+    can load engine.py without MATLAB present.
+    """
+    import matlab
+    return matlab
 
 
 class REticoloEngine:
@@ -71,29 +95,31 @@ class REticoloEngine:
             return {"status": "error", "error_code": "lease_acquire_failed",
                     "detail": acquired}
 
-        import matlab.engine  # noqa: F811
+        try:
+            import matlab.engine
+            self._engine = matlab.engine.start_matlab()
+            self._started_at = time.time()
 
-        self._engine = matlab.engine.start_matlab()
-        self._started_at = time.time()
-
-        self._engine.addpath(str(self._reticolo_dir), nargout=0)
-
-        self._engine.eval(
-            f"cd('{self._scratch_dir}');", nargout=0)
-
-        self._engine.eval("[~, ~] = retio([], inf*1i);", nargout=0)
-
-        for var in ("TMP", "TEMP", "TMPDIR"):
+            self._engine.addpath(str(self._reticolo_dir), nargout=0)
             self._engine.eval(
-                f"setenv('{var}','{self._matlab_temp}');", nargout=0)
+                f"cd('{self._scratch_dir}');", nargout=0)
+            self._engine.eval("[~, ~] = retio([], inf*1i);", nargout=0)
 
-        self._engine.eval("parm = res0;", nargout=0)
-        self._engine.eval("parm.res1.champ = 0;", nargout=0)
-        self._engine.eval("parm.res1.trace = 0;", nargout=0)
+            for var in ("TMP", "TEMP", "TMPDIR"):
+                self._engine.eval(
+                    f"setenv('{var}','{self._matlab_temp}');", nargout=0)
 
-        self._engine.eval("ro = 0; delta0 = 0;", nargout=0)
+            self._engine.eval("parm = res0;", nargout=0)
+            self._engine.eval("parm.res1.champ = 0;", nargout=0)
+            self._engine.eval("parm.res1.trace = 0;", nargout=0)
+            self._engine.eval("ro = 0; delta0 = 0;", nargout=0)
 
-        return self.status()
+            return self.status()
+        except Exception:
+            self._engine = None
+            self._started_at = None
+            lease_release()
+            raise
 
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""
@@ -162,7 +188,7 @@ class REticoloEngine:
             config_id: Provenance tag.
 
         Returns:
-            {status, wl_um, nn, R, T, A, energy_sum, solve_time_s, ...}
+            {status, wl_um, nn, R, T, A_balance, passive, solve_time_s, config_id}
         """
         if self._engine is None:
             return {"status": "error", "error_code": "engine_not_started",
@@ -181,6 +207,7 @@ class REticoloEngine:
                     "detail": "polarization must be 1 (TE) or -1 (TM)",
                     "config_id": config_id}
 
+        matlab = _ensure_matlab()
         t0 = time.time()
 
         try:
@@ -189,12 +216,14 @@ class REticoloEngine:
             eng.workspace["_wl"] = float(wl_um)
             eng.workspace["_D"] = matlab.double(D_list)
             eng.workspace["_nn"] = matlab.int32([nn_int])
-            eng.workspace["_textures"] = _textures_to_cell(eng, textures)
+            eng.workspace["_textures"] = _textures_to_cell(eng, matlab, textures)
             eng.workspace["_heights"] = matlab.double(
                 [float(v) for v in profil["heights"]])
             eng.workspace["_pindices"] = matlab.int32(
                 [[int(v) for v in profil["indices"]]])
 
+            # TE (pol=1) and TM (pol=-1) both read from ef.TEinc_top_*
+            # — the prefix refers to top-incident direction, not polarization.
             eng.eval(f"parm.sym.pol = {pol};", nargout=0)
 
             eng.eval(
@@ -210,18 +239,19 @@ class REticoloEngine:
 
             R = float(eng.workspace["_R"])
             T = float(eng.workspace["_T"])
-            A = 1.0 - R - T
+            A_balance = 1.0 - R - T
             dt = round(time.time() - t0, 3)
+            passive = bool(0 <= R <= 1 and 0 <= T <= 1 and 0 <= A_balance <= 1)
 
             return {
                 "status": "ok",
                 "wl_um": wl_um,
                 "nn": nn_int,
+                "polarization": pol,
                 "R": R,
                 "T": T,
-                "A": A,
-                "energy_sum": R + T + A,
-                "passive": 0 <= R <= 1 and 0 <= T <= 1 and 0 <= A <= 1,
+                "A_balance": A_balance,
+                "passive": passive,
                 "solve_time_s": dt,
                 "config_id": config_id,
             }
@@ -231,6 +261,7 @@ class REticoloEngine:
                 "error_code": "solve_failed",
                 "wl_um": wl_um,
                 "nn": nn_int,
+                "polarization": pol,
                 "error": _classify_error(exc),
                 "config_id": config_id,
             }
@@ -240,15 +271,13 @@ class REticoloEngine:
 # MATLAB cell-array helpers
 # ------------------------------------------------------------------
 
-def _textures_to_cell(eng: Any, textures: list[Any]) -> Any:
+def _textures_to_cell(eng: Any, matlab: Any, textures: list[Any]) -> Any:
     """Build a MATLAB cell array from Python textures list.
 
     Each entry:
       - number → complex scalar (refractive index n + i*k).
       - list starting with a number → cell array {bg_n, inc1, inc2, ...}.
     """
-    import matlab
-
     cell = eng.cell(1, len(textures))
     for i, tex in enumerate(textures):
         if isinstance(tex, (int, float, complex)):

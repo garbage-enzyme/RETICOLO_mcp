@@ -112,11 +112,13 @@ class TestSolveValidation:
         eng = REticoloEngine(Path("/"))
         eng._engine = MagicMock()
         eng._engine.workspace = {}
-        r = eng.solve_point(
-            wl_um=5.0, D=1.0, nn=[5, 5],
-            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
-            polarization=0,
-        )
+        mock_matlab = MagicMock()
+        with patch("reticolo_mcp.engine._ensure_matlab", return_value=mock_matlab):
+            r = eng.solve_point(
+                wl_um=5.0, D=1.0, nn=[5, 5],
+                textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+                polarization=0,
+            )
         assert r["status"] == "error"
         assert r["error_code"] == "invalid_polarization"
 
@@ -177,25 +179,26 @@ class TestServerValidation:
         eng = REticoloEngine(Path("/"))
         eng._engine = MagicMock()
         eng._engine.workspace = {}
+        # config_id truncation is handled by server layer, not engine.
+        # Engine accepts any config_id; server caps at MAX_CONFIG_ID_LEN.
         r = eng.solve_point(
-            wl_um=5.0, D=1.0, nn=[5, 5],
+            wl_um=5.0, D=[1, 2, 3], nn=[5, 5],
             textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
             config_id="a" * 200,
         )
-        assert r["status"] == "error"  # no MATLAB, but config_id not the issue
-        # config_id would be truncated to 128 by server, but engine
-        # doesn't enforce it — that's ok, server layer handles it.
+        assert r["status"] == "error"
+        assert r["error_code"] == "invalid_D"
 
     def test_textures_limit(self):
         from reticolo_mcp.engine import REticoloEngine
         eng = REticoloEngine(Path("/"))
         eng._engine = MagicMock()
         eng._engine.workspace = {}
+        # textures count limit is handled by server layer.
         r = eng.solve_point(
-            wl_um=5.0, D=1.0, nn=[5, 5],
+            wl_um=5.0, D=[1, 2, 3], nn=[5, 5],
             textures=[1.0] * 40,
             profil={"heights": [0, 0], "indices": [1, 1]},
         )
-        # engine allows 40 textures (server caps at 32), so this goes through
-        # but with mocked engine. The server layer does the cap.
-        assert "status" in r  # any result is fine here
+        assert r["status"] == "error"
+        assert r["error_code"] == "invalid_D"

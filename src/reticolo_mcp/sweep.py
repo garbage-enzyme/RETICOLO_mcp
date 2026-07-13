@@ -69,9 +69,9 @@ def run_sweep(
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow([
-                "wl_um", "nn_x", "nn_y", "R", "T", "A", "energy_sum",
+                "wl_um", "nn_x", "nn_y", "R", "T", "A_balance",
                 "passive", "solve_time_s", "status", "error",
-                "config_id", "timestamp",
+                "config_id", "polarization", "timestamp",
             ])
 
         for wl in pending:
@@ -88,13 +88,13 @@ def run_sweep(
                 result.get("nn", [nn[0], nn[1]])[1],
                 f"{result.get('R', 0):.12f}" if result["status"] == "ok" else "",
                 f"{result.get('T', 0):.12f}" if result["status"] == "ok" else "",
-                f"{result.get('A', 0):.12f}" if result["status"] == "ok" else "",
-                f"{result.get('energy_sum', 0):.12f}" if result["status"] == "ok" else "",
+                f"{result.get('A_balance', 0):.12f}" if result["status"] == "ok" else "",
                 str(result.get("passive", "")),
-                f"{result.get('solve_time_s', time.time() - row_time):.3f}",
+                f"{float(result.get('solve_time_s', time.time() - row_time)):.3f}",
                 result["status"],
                 result.get("error", ""),
                 config_id,
+                str(result.get("polarization", "")),
                 time.strftime("%Y-%m-%dT%H:%M:%S"),
             ])
             f.flush()
