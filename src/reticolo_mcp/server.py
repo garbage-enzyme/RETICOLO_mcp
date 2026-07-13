@@ -8,8 +8,9 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from pathlib import Path
+import tempfile
 import uuid
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
@@ -20,6 +21,7 @@ from .lease import lease_status as _lease_status
 from .sweep import run_sweep
 from .config_hash import compute_config_hash
 from . import jobs
+from .convergence import run_convergence
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
@@ -328,6 +330,50 @@ def job_resume(job_id: str) -> dict:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     return {"status": "ok", "job_id": job_id, "resumed": True}
+
+
+@mcp.tool()
+def reticolo_convergence(
+    coarse_start: float,
+    coarse_end: float,
+    D: list[float],
+    nn: list[int],
+    textures: list,
+    profil: dict,
+    polarization: int = 1,
+    config_label: str = "",
+    coarse_step: float = 0.01,
+    fine_half: float = 0.02,
+    fine_step: float = 0.002,
+    tol_wl: float = 0.002,
+    tol_A: float = 0.01,
+) -> dict:
+    """Run progressive harmonic convergence over Fourier orders.
+
+    For each order from nn[0] to nn[1]:
+      1. Coarse scan to locate peaks.
+      2. Fine scan around each interior peak → FWHM, Q.
+      3. Compare with previous order for convergence.
+
+    Requires engine to be connected (call reticolo_start first).
+    """
+    if engine.status()["status"] != "connected":
+        return {"status": "error", "error_code": "engine_not_started"}
+
+    out_dir = Path(tempfile.gettempdir()) / f"ret_conv_{uuid.uuid4().hex[:8]}"
+
+    return run_convergence(
+        engine=engine,
+        nn_start=nn[0], nn_max=nn[1],
+        coarse_start=coarse_start, coarse_end=coarse_end,
+        coarse_step=coarse_step,
+        fine_half_width=fine_half, fine_step=fine_step,
+        D=D, textures=textures, profil=profil,
+        polarization=polarization,
+        output_dir=out_dir,
+        config_label=config_label or "conv",
+        tol_wl_um=tol_wl, tol_A=tol_A,
+    )
 
 
 # ------------------------------------------------------------------

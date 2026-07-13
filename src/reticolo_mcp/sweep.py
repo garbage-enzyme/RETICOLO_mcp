@@ -123,6 +123,76 @@ def run_sweep(
     }
 
 
+# ------------------------------------------------------------------
+# sweep analysis — peak detection, boundary marking
+# ------------------------------------------------------------------
+
+
+def analyze_sweep(csv_path: Path) -> dict[str, Any]:
+    """Read a completed sweep CSV and return peak summary.
+
+    Marks boundary points (first/last wavelength) explicitly — they
+    cannot be accepted as physical peaks without bracket evidence.
+    """
+    rows: list[dict[str, Any]] = []
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("status") != "ok":
+                    continue
+                try:
+                    rows.append({
+                        "wl": float(row["wl_um"]),
+                        "A": float(row["A_balance"]),
+                        "R": float(row["R"]),
+                        "T": float(row["T"]),
+                    })
+                except (ValueError, KeyError):
+                    pass
+    except (OSError, csv.Error):
+        return {"error": "cannot_read_csv", "path": str(csv_path)}
+
+    if not rows:
+        return {"points": 0, "peaks": [], "boundary_maxima": []}
+
+    rows.sort(key=lambda r: r["wl"])
+    wls = [r["wl"] for r in rows]
+    vals = [r["A"] for r in rows]
+
+    peaks: list[dict[str, Any]] = []
+    boundary_maxima: list[dict[str, Any]] = []
+
+    for i in range(len(vals)):
+        is_boundary = (i == 0 or i == len(vals) - 1)
+        is_local_max = False
+        if i > 0 and i < len(vals) - 1:
+            if vals[i] > vals[i - 1] and vals[i] > vals[i + 1]:
+                is_local_max = True
+        elif is_boundary:
+            is_local_max = vals[i] > vals[1] if i == 0 else vals[i] > vals[-2]
+
+        if is_local_max:
+            entry = {
+                "wl_um": wls[i],
+                "A": vals[i],
+                "R": rows[i]["R"],
+                "T": rows[i]["T"],
+                "boundary": is_boundary,
+                "index": i,
+            }
+            if is_boundary:
+                boundary_maxima.append(entry)
+            else:
+                peaks.append(entry)
+
+    return {
+        "points": len(rows),
+        "wl_range": [wls[0], wls[-1]],
+        "peaks": peaks,
+        "boundary_maxima": boundary_maxima,
+    }
+
+
 def _read_completed(csv_path: Path, resume_key: str) -> set[float]:
     """Return wavelengths already solved with matching resume identity.
 
