@@ -1,0 +1,17 @@
+This repository includes RETICOLO V10, which is licensed under the
+Creative Commons Attribution 4.0 International License (CC-BY 4.0).
+
+RETICOLO V10 is copyright by Jean Paul Hugonin and Philippe Lalanne.
+Source: https://zenodo.org/records/14631951
+DOI: 10.5281/zenodo.14631951
+
+Reference:
+  J.P. Hugonin, P. Lalanne, "Reticolo software for grating analysis",
+  arXiv preprint arXiv:2101.00901.
+
+RETICOLO V10 files are located in the `reticolo_v10/` directory.
+This directory is unmodified from the original Zenodo release,
+except for the path relocation.
+
+The MCP wrapper code (all Python source files outside `reticolo_v10/`)
+is licensed under the MIT License. See LICENSE.

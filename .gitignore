@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+*.mat
+*.log
+*.csv
+.env
+# RETICOLO scratch directories (retXXXX at repo root only)
+ret[0-9a-z][0-9a-z][0-9a-z][0-9a-z]/
