@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import MATLAB_TEMP_DIR, MAX_CONFIG_ID_LEN, MAX_ERROR_CHARS, RETICOLO_SCRATCH_DIR
+from .lease import lease_acquire, lease_release, lease_status as _lease_status
 
 
 class REticoloEngine:
@@ -51,6 +52,11 @@ class REticoloEngine:
         if self._engine is not None:
             return self.status()
 
+        ls = _lease_status()
+        if ls["collision"]:
+            return {"status": "error", "error_code": "lease_collision",
+                    "blockers": ls["blockers"]}
+
         import_err = _check_matlab_engine()
         if import_err:
             return {"status": "error", "error_code": "matlab_engine_not_installed",
@@ -59,6 +65,11 @@ class REticoloEngine:
         if not self._reticolo_dir.is_dir():
             return {"status": "error", "error_code": "reticolo_dir_missing",
                     "detail": str(self._reticolo_dir)}
+
+        acquired = lease_acquire("interactive")
+        if not acquired["acquired"]:
+            return {"status": "error", "error_code": "lease_acquire_failed",
+                    "detail": acquired}
 
         import matlab.engine  # noqa: F811
 
@@ -87,6 +98,7 @@ class REticoloEngine:
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""
         if self._engine is None:
+            lease_release()
             return {"status": "stopped"}
 
         for cmd in ("retio;", "clear all;"):
@@ -102,13 +114,16 @@ class REticoloEngine:
 
         self._engine = None
         self._started_at = None
+        lease_release()
         return {"status": "stopped"}
 
     def status(self) -> dict[str, Any]:
         """Return current state without side effects."""
+        ls = _lease_status()
         if self._engine is None:
             return {"status": "stopped", "connected": False,
-                    "reticolo_path": str(self._reticolo_dir)}
+                    "reticolo_path": str(self._reticolo_dir),
+                    "lease": ls}
         return {
             "status": "connected",
             "connected": True,
@@ -117,6 +132,7 @@ class REticoloEngine:
             "reticolo_path": str(self._reticolo_dir),
             "scratch_dir": self._scratch_dir,
             "disk_safety": "vmax=inf",
+            "lease": ls,
         }
 
     # ------------------------------------------------------------------

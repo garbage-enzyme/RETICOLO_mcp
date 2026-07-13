@@ -17,6 +17,7 @@ from mcp.server.fastmcp import FastMCP
 from . import __version__
 from .config import MAX_CONFIG_ID_LEN, MAX_TEXTURES, RETICOLO_DIR
 from .engine import REticoloEngine
+from .lease import lease_status as _lease_status
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
@@ -98,6 +99,17 @@ def reticolo_solve_point(
         polarization=int(polarization),
         config_id=config_id,
     )
+
+
+@mcp.tool()
+def solver_status() -> dict:
+    """Report solver lease state without starting MATLAB.
+
+    Returns reticolo lease status, COMSOL MCP lease status,
+    collision detection, and whether the solver is ready.
+    Read-only. Does not start MATLAB or COMSOL.
+    """
+    return _lease_status()
 
 
 # ------------------------------------------------------------------
