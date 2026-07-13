@@ -35,18 +35,44 @@ from reticolo_mcp.sweep import run_sweep
 from reticolo_mcp.lease import lease_acquire, lease_release, lease_heartbeat
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print("Usage: python -m reticolo_mcp.worker <job_id>", file=sys.stderr)
-        return 1
+def _to_complex(textures: list[Any]) -> list[Any]:
+    """Convert JSON-safe [[re, im], ...] textures to Python complex numbers."""
+    result = []
+    for tex in textures:
+        if isinstance(tex, list) and len(tex) == 2 and all(
+            isinstance(x, (int, float)) for x in tex):
+            result.append(complex(tex[0], tex[1]))
+        elif isinstance(tex, list):
+            sub = []
+            for item in tex:
+                if isinstance(item, list) and len(item) == 2 and all(
+                    isinstance(x, (int, float)) for x in item):
+                    sub.append(complex(item[0], item[1]))
+                elif isinstance(item, list):
+                    sub.append(item)
+                else:
+                    sub.append(item)
+            result.append(sub)
+        else:
+            result.append(tex)
+    return result
 
-    job_id = sys.argv[1]
+
+def main(job_id: str | None = None) -> int:
+    if job_id is None:
+        if len(sys.argv) < 2:
+            print("Usage: python -m reticolo_mcp.worker <job_id>", file=sys.stderr)
+            return 1
+        job_id = sys.argv[1]
     _setup_logging(job_id)
 
     spec = read_spec(job_id)
     if spec is None:
         _log(job_id, "spec not found")
         return 1
+
+    # Convert JSON-safe [re, im] pairs back to Python complex
+    spec["_textures_complex"] = _to_complex(spec.get("textures", []))
 
     try:
         return _run_job(job_id, spec)
@@ -103,7 +129,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             wls_um=spec["wls_um"],
             nn=spec["nn"],
             D=D,
-            textures=spec.get("textures", [1.0]),
+            textures=spec.get("_textures_complex", spec.get("textures", [1.0])),
             profil={
                 "heights": spec.get("profil_heights", [0, 0]),
                 "indices": spec.get("profil_indices", [1, 1]),

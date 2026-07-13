@@ -222,6 +222,114 @@ def reticolo_sweep(
     )
 
 
+@mcp.tool()
+def job_submit(
+    wls_um: list[float],
+    D: list[float],
+    nn: list[int],
+    textures: list,
+    profil: dict,
+    polarization: int = 1,
+    config_label: str = "",
+    mode: str = "memory",
+) -> dict:
+    """Submit a durable staged-sweep job. Returns immediately with job_id.
+
+    The worker runs independently in a detached process. Use job_status
+    and job_tail to monitor progress.
+    """
+    job_id = f"job-{uuid.uuid4().hex[:12]}"
+    spec = jobs.create_job_spec(
+        wls_um=wls_um, D=D, nn=nn, textures=textures, profil=profil,
+        polarization=polarization, config_label=config_label, mode=mode,
+    )
+    try:
+        jobs.write_spec(job_id, spec)
+    except ValueError as exc:
+        return {"status": "error", "error_code": "spec_rejected",
+                "detail": str(exc)}
+
+    jobs.write_state(job_id, {"status": "submitted"})
+    jobs.append_event(job_id, {"event": "job_submitted"})
+
+    worker_script = str(Path(__file__).resolve().parent / "worker.py")
+    subprocess.Popen(
+        [sys.executable, worker_script, job_id],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+    return {"status": "ok", "job_id": job_id,
+            "config_hash": spec["config_hash"],
+            "total_points": len(wls_um)}
+
+
+@mcp.tool()
+def job_status(job_id: str) -> dict:
+    """Report durable job state. Read-only, no side effects."""
+    state = jobs.read_state(job_id)
+    spec = jobs.read_spec(job_id)
+    if state is None:
+        return {"status": "error", "error_code": "job_not_found"}
+    return {
+        "job_id": job_id,
+        "state": state,
+        "total_points": len(spec["wls_um"]) if spec else 0,
+        "config_hash": spec.get("config_hash", "") if spec else "",
+    }
+
+
+@mcp.tool()
+def job_tail(job_id: str, n: int = 20) -> dict:
+    """Return the last N events from a job. Read-only."""
+    events = jobs.read_events(job_id, tail=n)
+    state = jobs.read_state(job_id)
+    return {"job_id": job_id, "events": events,
+            "state": state}
+
+
+@mcp.tool()
+def job_cancel(job_id: str) -> dict:
+    """Request cancellation of a running job.
+
+    The worker checks for cancellation between solve points.
+    This is cooperative; it cannot interrupt a running res1 call.
+    """
+    state = jobs.read_state(job_id)
+    if state is None:
+        return {"status": "error", "error_code": "job_not_found"}
+    if state["status"] not in ("running", "starting"):
+        return {"status": "error", "error_code": "not_running",
+                "current_status": state["status"]}
+
+    jobs.write_state(job_id, {**state, "status": "cancel_requested"})
+    jobs.append_event(job_id, {"event": "cancel_requested"})
+    return {"status": "ok", "job_id": job_id, "cancel_requested": True}
+
+
+@mcp.tool()
+def job_resume(job_id: str) -> dict:
+    """Resume a failed or interrupted job. Starts a new worker."""
+    state = jobs.read_state(job_id)
+    if state is None:
+        return {"status": "error", "error_code": "job_not_found"}
+    if state["status"] in ("running", "starting", "cancel_requested"):
+        return {"status": "error", "error_code": "cannot_resume",
+                "current_status": state["status"]}
+    if state["status"] == "completed":
+        return {"status": "ok", "message": "job already completed",
+                "job_id": job_id}
+
+    jobs.write_state(job_id, {**state, "status": "submitted"})
+    jobs.append_event(job_id, {"event": "job_resumed"})
+
+    worker_script = str(Path(__file__).resolve().parent / "worker.py")
+    subprocess.Popen(
+        [sys.executable, worker_script, job_id],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return {"status": "ok", "job_id": job_id, "resumed": True}
+
+
 # ------------------------------------------------------------------
 # main
 # ------------------------------------------------------------------
