@@ -22,6 +22,7 @@ from .sweep import run_sweep
 from .config_hash import compute_config_hash
 from . import jobs
 from .convergence import run_convergence
+from .field_export import export_field
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
@@ -373,6 +374,43 @@ def reticolo_convergence(
         output_dir=out_dir,
         config_label=config_label or "conv",
         tol_wl_um=tol_wl, tol_A=tol_A,
+    )
+
+
+@mcp.tool()
+def reticolo_field_export(
+    wl_um: float,
+    D: list[float],
+    nn: list[int],
+    textures: list,
+    profil: dict,
+    polarization: int = 1,
+    component: str = "normE",
+    slice_axis: str = "z",
+    slice_value: float = 0.0,
+    max_points: int = 500_000,
+    output_dir: str = "",
+    config_label: str = "",
+) -> dict:
+    """Solve and export electromagnetic field on a slice plane.
+
+    Requires engine to be connected. Returns coordinate bounds,
+    field max/min, and writes NPZ + JSON summary if output_dir provided.
+    Does NOT return large arrays through MCP — use output_dir.
+    """
+    if engine.status()["status"] != "connected":
+        return {"status": "error", "error_code": "engine_not_started"}
+
+    return export_field(
+        engine=engine,
+        wl_um=wl_um, D=D, nn=nn,
+        textures=textures, profil=profil,
+        polarization=polarization,
+        component=component,
+        slice_axis=slice_axis, slice_value=slice_value,
+        max_points=max_points,
+        output_dir=output_dir or None,
+        config_label=config_label,
     )
 
 
