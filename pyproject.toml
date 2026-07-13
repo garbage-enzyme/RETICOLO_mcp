@@ -11,6 +11,7 @@ license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.28",
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]
@@ -20,3 +21,8 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# reticolo_v10/ is NOT included in the wheel.
+# It is CC-BY 4.0 licensed (different from the MIT wrapper).
+# Users must clone the repository or set RETICOLO_MCP_DIR to a local
+# RETICOLO V10 installation. See README and NOTICE.
