@@ -18,6 +18,7 @@ from . import __version__
 from .config import MAX_CONFIG_ID_LEN, MAX_TEXTURES, RETICOLO_DIR
 from .engine import REticoloEngine
 from .lease import lease_status as _lease_status
+from .sweep import run_sweep
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
@@ -110,6 +111,55 @@ def solver_status() -> dict:
     Read-only. Does not start MATLAB or COMSOL.
     """
     return _lease_status()
+
+
+@mcp.tool()
+def reticolo_sweep(
+    wls_um: list[float],
+    nn: list[int],
+    D: list[float],
+    textures: list,
+    profil: dict,
+    csv_path: str,
+    config_id: str = "",
+    polarization: int = 1,
+    resume: bool = True,
+) -> dict:
+    """Run a resumable wavelength sweep with per-row CSV persistence.
+
+    Each wavelength is solved via solve_point and written immediately to CSV
+    with flush+fsync. On resume, rows with matching config_id and status=ok
+    are skipped.
+
+    Args:
+        wls_um: Sorted list of wavelengths in microns.
+        nn: Fourier orders [nx, ny].
+        D: Lattice period(s) — [Px] or [Px, Py].
+        textures: Layer material definitions.
+        profil: {"heights": [...], "indices": [...]}.
+        csv_path: Absolute path for the output CSV file.
+        config_id: Provenance tag (max 128 chars). Resume matches on this.
+        polarization: 1 for TE, -1 for TM.
+        resume: If True, skip already-solved rows.
+
+    Returns:
+        {total, solved, skipped, errors, csv_path, runtime_s, status}
+    """
+    if engine.status()["status"] != "connected":
+        return {"status": "error", "error_code": "engine_not_started"}
+
+    return run_sweep(
+        engine=engine,
+        wls_um=[float(w) for w in wls_um],
+        nn=[int(nn[0]), int(nn[1])] if len(nn) >= 2 else [int(nn[0]), int(nn[0])],
+        D=D,
+        textures=textures,
+        profil=profil,
+        polarization=int(polarization),
+        config_id=config_id,
+        csv_path=csv_path,
+        resume=resume,
+    )
 
 
 # ------------------------------------------------------------------
