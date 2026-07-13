@@ -66,15 +66,27 @@ class REticoloEngine:
         self._started_at: float | None = None
         self._matlab_temp: str = str(MATLAB_TEMP_DIR)
         self._scratch_dir: str = str(RETICOLO_SCRATCH_DIR)
+        self._lease_token: str = ""
+        self._mode: str = "memory"
 
     # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> dict[str, Any]:
-        """Start MATLAB engine, add RETICOLO path, apply M0 disk safety."""
+    def start(self, mode: str = "memory") -> dict[str, Any]:
+        """Start MATLAB engine, add RETICOLO path, apply M0 disk safety.
+
+        Args:
+            mode: "memory" (no disk spill, vmax=inf) or "scratch"
+                  (per-point cleanup via retio in owned directory).
+        """
         if self._engine is not None:
             return self.status()
+
+        if mode not in ("memory", "scratch"):
+            return {"status": "error", "error_code": "invalid_mode",
+                    "detail": "mode must be 'memory' or 'scratch'"}
+        self._mode = mode
 
         ls = _lease_status()
         if ls["collision"]:
@@ -90,10 +102,17 @@ class REticoloEngine:
             return {"status": "error", "error_code": "reticolo_dir_missing",
                     "detail": str(self._reticolo_dir)}
 
-        acquired = lease_acquire("interactive")
+        acquired = lease_acquire("interactive", mode=mode)
         if not acquired["acquired"]:
             return {"status": "error", "error_code": "lease_acquire_failed",
                     "detail": acquired}
+        self._lease_token = acquired.get("token", "")
+
+        # P0-7: create dirs and set env before engine start
+        Path(self._matlab_temp).mkdir(parents=True, exist_ok=True)
+        Path(self._scratch_dir).mkdir(parents=True, exist_ok=True)
+        for var in ("TMP", "TEMP", "TMPDIR"):
+            os.environ[var] = self._matlab_temp
 
         try:
             import matlab.engine
@@ -103,27 +122,41 @@ class REticoloEngine:
             self._engine.addpath(str(self._reticolo_dir), nargout=0)
             self._engine.eval(
                 f"cd('{self._scratch_dir}');", nargout=0)
-            self._engine.eval("[~, ~] = retio([], inf*1i);", nargout=0)
+
+            if mode == "memory":
+                self._engine.eval("[~, ~] = retio([], inf*1i);", nargout=0)
 
             for var in ("TMP", "TEMP", "TMPDIR"):
                 self._engine.eval(
                     f"setenv('{var}','{self._matlab_temp}');", nargout=0)
 
+            # health check: verify RETICOLO functions are reachable
             self._engine.eval("parm = res0;", nargout=0)
             self._engine.eval("parm.res1.champ = 0;", nargout=0)
             self._engine.eval("parm.res1.trace = 0;", nargout=0)
             self._engine.eval("ro = 0; delta0 = 0;", nargout=0)
 
+            # verify MATLAB's actual tempdir matches what we set
+            self._engine.eval("_actual_tmp = tempdir;", nargout=0)
+            actual = str(self._engine.workspace["_actual_tmp"]).lower()
+            expected = self._matlab_temp.lower()
+            if expected not in actual.replace("\\", "/"):
+                self._engine.eval(
+                    "fprintf(2, 'WARNING: MATLAB tempdir=%s, expected=%s\\n', "
+                    "tempdir, getenv('TMP'));", nargout=0)
+
             return self.status()
         except Exception:
             self._engine = None
             self._started_at = None
+            self._lease_token = ""
             lease_release()
             raise
 
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""
         if self._engine is None:
+            self._lease_token = ""
             lease_release()
             return {"status": "stopped"}
 
@@ -140,6 +173,7 @@ class REticoloEngine:
 
         self._engine = None
         self._started_at = None
+        self._lease_token = ""
         lease_release()
         return {"status": "stopped"}
 
@@ -149,6 +183,7 @@ class REticoloEngine:
         if self._engine is None:
             return {"status": "stopped", "connected": False,
                     "reticolo_path": str(self._reticolo_dir),
+                    "mode": self._mode,
                     "lease": ls}
         return {
             "status": "connected",
@@ -157,7 +192,7 @@ class REticoloEngine:
             "uptime_s": round(time.time() - (self._started_at or 0), 1),
             "reticolo_path": str(self._reticolo_dir),
             "scratch_dir": self._scratch_dir,
-            "disk_safety": "vmax=inf",
+            "mode": self._mode,
             "lease": ls,
         }
 
