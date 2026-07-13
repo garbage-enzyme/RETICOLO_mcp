@@ -6,6 +6,7 @@ Start with: python -m reticolo_mcp.server
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -256,9 +257,14 @@ def job_submit(
     jobs.append_event(job_id, {"event": "job_submitted"})
 
     worker_script = str(Path(__file__).resolve().parent / "worker.py")
+    env = os.environ.copy()
+    src_dir = str(Path(__file__).resolve().parent.parent)
+    existing_path = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_path}" if existing_path else src_dir
     subprocess.Popen(
         [sys.executable, worker_script, job_id],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=env,
     )
 
     return {"status": "ok", "job_id": job_id,
@@ -326,9 +332,14 @@ def job_resume(job_id: str) -> dict:
     jobs.append_event(job_id, {"event": "job_resumed"})
 
     worker_script = str(Path(__file__).resolve().parent / "worker.py")
+    env = os.environ.copy()
+    src_dir = str(Path(__file__).resolve().parent.parent)
+    existing_path = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_path}" if existing_path else src_dir
     subprocess.Popen(
         [sys.executable, worker_script, job_id],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=env,
     )
     return {"status": "ok", "job_id": job_id, "resumed": True}
 

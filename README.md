@@ -69,7 +69,19 @@ python -m reticolo_mcp.server
 | G1 — M0 resource | nn=9×2 + nn=15×1, C: Δ=0 GB, no `retXXXX` orphans, memory mode |
 | G2 — Numerical baseline | TE slab n=1.5: R=0.147929 vs analytical 0.1479 (0.03% err); lossy slab passive ✓ |
 | G3 — Durable jobs | Worker → results match G2; resume skips completed rows |
-| Unit tests | 61 passed (import safety, config, schema, engine, lease, sweep, jobs, hash) |
+| Unit tests | 133 passed (import safety, config, schema, engine, lease, sweep, jobs, hash, convergence, field_export, worker, server) |
+| G0 — Engine lifecycle | Start → health → stop, no MATLAB leak, no orphans (MCP verified 2026-07-13) |
+| M3 — High-order smoke | nn=21 (32s) + nn=31 (261s), memory-mode stable, no OOM |
+| M4 — Scratch mode | solves correctly, matches memory-mode results |
+
+## Known limitations
+
+- **TM at normal/off-normal incidence:** `pol=-1` gives R=T=0 for symmetric structures
+  due to RETICOLO V10 field-decomposition degeneracy. Use off-normal with `delta0≠0`
+  or investigate `ef.TMinc_top_*` channels.
+- **Field export (`retchamp`):** RETICOLO V10 `retapod`/`retchamp` crashes on uniform
+  structures with an `imag(apod)` type error. This is an upstream V10 bug; field export
+  is unverified until a workaround or V10 patch is available.
 
 ## ⚠ Disk safety
 

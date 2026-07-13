@@ -11,7 +11,9 @@ import pytest
 
 from reticolo_mcp.lease import (
     _is_pid_alive,
+    _process_creation_date,
     lease_acquire,
+    lease_heartbeat,
     lease_release,
     lease_status,
 )
@@ -73,3 +75,48 @@ class TestLeaseLifecycle:
         s = lease_status()
         assert s["reticolo_lease"]["active"] is False
         lease_release()
+
+    def test_heartbeat_updates(self):
+        r = lease_acquire("test")
+        assert r["acquired"] is True
+        token = r["token"]
+
+        import time
+        time.sleep(0.1)
+        ok = lease_heartbeat(token)
+        assert ok is True
+        assert self.lease_path.is_file()
+
+        import json
+        data = json.loads(self.lease_path.read_text())
+        assert data["heartbeat"] > data["created_at"]
+
+        lease_release()
+
+    def test_heartbeat_wrong_token(self):
+        lease_acquire("test")
+        ok = lease_heartbeat("wrong-token")
+        assert ok is False
+        lease_release()
+
+    def test_heartbeat_no_active_lease(self):
+        ok = lease_heartbeat("any-token")
+        assert ok is False
+
+
+class TestProcessCreationDate:
+    def test_own_pid(self):
+        import os
+        cdate = _process_creation_date(os.getpid())
+        assert cdate is not None
+        assert isinstance(cdate, float)
+        assert cdate > 0
+
+    def test_zero_pid(self):
+        assert _process_creation_date(0) is None
+
+    def test_negative_pid(self):
+        assert _process_creation_date(-1) is None
+
+    def test_dead_pid(self):
+        assert _process_creation_date(99999999) is None

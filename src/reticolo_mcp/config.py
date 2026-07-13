@@ -15,10 +15,20 @@ REPO_ROOT = HERE.parent.parent
 
 # -- RETICOLO directory --------------------------------------------------
 
-RETICOLO_DIR = Path(
-    os.environ.get("RETICOLO_MCP_DIR", "")
-    or str(REPO_ROOT / "reticolo_v10" / "reticolo_allege_v10")
-)
+def _resolve_reticolo_dir() -> Path:
+    env = os.environ.get("RETICOLO_MCP_DIR", "")
+    if env:
+        return Path(env)
+    bundled = REPO_ROOT / "reticolo_v10" / "reticolo_allege_v10"
+    if bundled.is_dir():
+        return bundled
+    cwd_bundled = Path.cwd() / "reticolo_v10" / "reticolo_allege_v10"
+    if cwd_bundled.is_dir():
+        return cwd_bundled
+    return bundled
+
+
+RETICOLO_DIR = _resolve_reticolo_dir()
 
 # -- MATLAB scratch and temp ---------------------------------------------
 

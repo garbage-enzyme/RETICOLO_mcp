@@ -169,6 +169,61 @@ class TestErrorClassification:
 
 
 # ------------------------------------------------------------------
+# _textures_to_cell unit tests
+# ------------------------------------------------------------------
+
+
+class TestTexturesToCell:
+    def test_uniform_scalar(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.return_value = [None] * 2
+        matlab = MagicMock()
+
+        _textures_to_cell(eng, matlab, [1.0, 1.5])
+        assert eng.cell.call_count == 1
+        args = eng.cell.call_args[0]
+        assert args[1] == 2
+
+    def test_patterned_layer(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.side_effect = lambda r, c: [None] * c
+        matlab = MagicMock()
+
+        textures = [[1.0, [0.0, 0.0, 0.3, 0.3, 4.0, 0.001, 1]]]
+        _textures_to_cell(eng, matlab, textures)
+        assert eng.cell.call_count == 2
+
+    def test_complex_scalar(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.return_value = [None]
+        matlab = MagicMock()
+
+        _textures_to_cell(eng, matlab, [complex(4.0, 0.001)])
+        assert eng.cell.call_count == 1
+
+    def test_empty_textures(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.return_value = []
+        matlab = MagicMock()
+
+        result = _textures_to_cell(eng, matlab, [])
+        assert len(result) == 0
+
+    def test_plain_list_not_pattern(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.side_effect = lambda r, c: [None] * c
+        matlab = MagicMock()
+
+        _textures_to_cell(eng, matlab, [[1.0, 1.5]])
+        assert eng.cell.call_count == 2
+
+
+# ------------------------------------------------------------------
 # server tools — input validation
 # ------------------------------------------------------------------
 

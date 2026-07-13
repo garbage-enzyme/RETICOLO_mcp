@@ -66,6 +66,18 @@ def run_sweep(
                 "config_hash": config_hash, "status": "all_skipped"}
 
     file_exists = csv_path.exists()
+
+    if file_exists and config_hash:
+        existing_hash = _read_first_config_hash(csv_path)
+        if existing_hash and existing_hash != config_hash:
+            return {
+                "total": len(wls_um), "solved": 0, "skipped": 0,
+                "errors": 0, "csv_path": str(csv_path),
+                "runtime_s": 0, "config_hash": config_hash,
+                "status": "error",
+                "error": f"config_hash mismatch: existing={existing_hash} requested={config_hash}",
+            }
+
     t0 = time.time()
     solved = 0
     errors = 0
@@ -191,6 +203,21 @@ def analyze_sweep(csv_path: Path) -> dict[str, Any]:
         "peaks": peaks,
         "boundary_maxima": boundary_maxima,
     }
+
+
+def _read_first_config_hash(csv_path: Path) -> str | None:
+    """Read config_hash from the first data row, or None."""
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            hash_col = "config_hash" if "config_hash" in (reader.fieldnames or []) else None
+            if not hash_col:
+                return None
+            for row in reader:
+                return row.get(hash_col) or None
+    except (OSError, csv.Error):
+        return None
+    return None
 
 
 def _read_completed(csv_path: Path, resume_key: str) -> set[float]:
