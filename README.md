@@ -1,5 +1,8 @@
 # RETICOLO MCP
 
+> ⚠️ **UNDER ACTIVE DEVELOPMENT — DO NOT USE**
+> ⚠️ **开发中，请勿使用**
+
 MCP server for the [RETICOLO V10](https://zenodo.org/records/14631951) rigorous
 coupled-wave analysis (RCWA) solver. Wraps MATLAB R2025b via the Engine API so
 agents can compute RCWA spectra, convergence scans, and field maps without
