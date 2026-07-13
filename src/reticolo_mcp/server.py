@@ -6,8 +6,10 @@ Start with: python -m reticolo_mcp.server
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
+import uuid
 
 from mcp.server.fastmcp import FastMCP
 
@@ -17,6 +19,7 @@ from .engine import REticoloEngine
 from .lease import lease_status as _lease_status
 from .sweep import run_sweep
 from .config_hash import compute_config_hash
+from . import jobs
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)

@@ -95,10 +95,10 @@ class TestEngineLifecycle:
 
     def test_start_no_matlab_engine(self):
         from reticolo_mcp.engine import REticoloEngine
-        eng = REticoloEngine(Path("/"))
+        eng = REticoloEngine(Path("/__nonexistent_dir_test_xyz__"))
         r = eng.start()
         assert r["status"] == "error"
-        assert r["error_code"] == "matlab_engine_not_installed"
+        assert r["error_code"] == "reticolo_dir_missing"
 
 
 # ------------------------------------------------------------------
