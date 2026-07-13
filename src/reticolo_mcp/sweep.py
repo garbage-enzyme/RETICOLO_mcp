@@ -2,12 +2,14 @@
 
 One row per wavelength, flushed and fsynced immediately.
 Supports resume: reads existing CSV, skips rows with matching
-config_id and status=ok.
+config_hash (canonical) AND status=ok.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import os
 import time
 from pathlib import Path
@@ -23,7 +25,8 @@ def run_sweep(
     textures: list[Any],
     profil: dict[str, list],
     polarization: int = 1,
-    config_id: str,
+    config_id: str = "",
+    config_hash: str = "",
     csv_path: str | Path,
     resume: bool = True,
 ) -> dict[str, Any]:
@@ -37,28 +40,30 @@ def run_sweep(
         textures: RETICOLO texture definitions.
         profil: Layer thickness profile.
         polarization: 1 for TE, -1 for TM.
-        config_id: Stable configuration identity. Rows with a different
-                   config_id are skipped/replaced on resume.
+        config_id: Human-readable label (optional).
+        config_hash: Canonical SHA-256 of physical inputs.
+                     Resume matches on this, not config_id alone.
         csv_path: Path to output CSV file.
-        resume: If True, skip rows already solved with the same config_id.
+        resume: If True, skip rows already solved with matching config_hash.
 
     Returns:
-        {total, solved, skipped, errors, csv_path, runtime_s}
+        {total, solved, skipped, errors, csv_path, runtime_s, config_hash}
     """
     csv_path = Path(csv_path)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     D_list = [float(D)] if isinstance(D, (int, float)) else [float(v) for v in D]
 
+    resume_key = config_hash or config_id or ""
     skipped: set[float] = set()
     if resume and csv_path.exists():
-        skipped = _read_completed(csv_path, config_id)
+        skipped = _read_completed(csv_path, resume_key)
 
     pending = [w for w in sorted(wls_um) if w not in skipped]
     if not pending:
         return {"total": len(wls_um), "solved": 0, "skipped": len(skipped),
                 "errors": 0, "csv_path": str(csv_path), "runtime_s": 0,
-                "status": "all_skipped"}
+                "config_hash": config_hash, "status": "all_skipped"}
 
     file_exists = csv_path.exists()
     t0 = time.time()
@@ -71,7 +76,7 @@ def run_sweep(
             writer.writerow([
                 "wl_um", "nn_x", "nn_y", "R", "T", "A_balance",
                 "passive", "solve_time_s", "status", "error",
-                "config_id", "polarization", "timestamp",
+                "config_hash", "config_id", "polarization", "timestamp",
             ])
 
         for wl in pending:
@@ -93,6 +98,7 @@ def run_sweep(
                 f"{float(result.get('solve_time_s', time.time() - row_time)):.3f}",
                 result["status"],
                 result.get("error", ""),
+                config_hash,
                 config_id,
                 str(result.get("polarization", "")),
                 time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -112,18 +118,32 @@ def run_sweep(
         "errors": errors,
         "csv_path": str(csv_path),
         "runtime_s": round(time.time() - t0, 1),
+        "config_hash": config_hash,
         "status": "completed" if errors == 0 else "completed_with_errors",
     }
 
 
-def _read_completed(csv_path: Path, config_id: str) -> set[float]:
-    """Return wavelengths already solved with matching config_id."""
+def _read_completed(csv_path: Path, resume_key: str) -> set[float]:
+    """Return wavelengths already solved with matching resume identity.
+
+    Matches on config_hash if present, otherwise config_id.
+    """
+    if not resume_key:
+        return set()
     completed: set[float] = set()
     try:
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
+            hash_col = "config_hash" if "config_hash" in (reader.fieldnames or []) else None
+            id_col = "config_id" if "config_id" in (reader.fieldnames or []) else None
+
             for row in reader:
-                if row.get("config_id") != config_id:
+                key = ""
+                if hash_col and row.get(hash_col):
+                    key = row[hash_col]
+                elif id_col and row.get(id_col):
+                    key = row[id_col]
+                if key != resume_key:
                     continue
                 if row.get("status") != "ok":
                     continue

@@ -16,6 +16,7 @@ from .config import MAX_CONFIG_ID_LEN, MAX_TEXTURES, RETICOLO_DIR
 from .engine import REticoloEngine
 from .lease import lease_status as _lease_status
 from .sweep import run_sweep
+from .config_hash import compute_config_hash
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
