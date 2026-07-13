@@ -29,6 +29,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .config import MATLAB_TEMP_DIR, MAX_CONFIG_ID_LEN, MAX_ERROR_CHARS, RETICOLO_SCRATCH_DIR
+
 
 class REticoloEngine:
     """Owns exactly one MATLAB engine for RETICOLO RCWA computation."""
@@ -37,8 +39,8 @@ class REticoloEngine:
         self._reticolo_dir = reticolo_dir
         self._engine: Any = None
         self._started_at: float | None = None
-        self._matlab_temp: str = "D:\\matlab_temp"
-        self._scratch_dir: str = "D:\\reticolo_scratch"
+        self._matlab_temp: str = str(MATLAB_TEMP_DIR)
+        self._scratch_dir: str = str(RETICOLO_SCRATCH_DIR)
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -266,8 +268,8 @@ def _check_matlab_engine() -> str:
 def _classify_error(exc: Exception) -> str:
     """Return a bounded error string, classified by type."""
     msg = str(exc)
-    if len(msg) > 500:
-        msg = msg[:497] + "..."
+    if len(msg) > MAX_ERROR_CHARS:
+        msg = msg[:MAX_ERROR_CHARS - 3] + "..."
     if "disk" in msg.lower() or "space" in msg.lower():
         return f"disk_error: {msg}"
     if "memory" in msg.lower() or "out of memory" in msg.lower():

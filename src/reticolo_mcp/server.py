@@ -9,34 +9,17 @@ Profile detection follows the environment variable:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from . import __version__
+from .config import MAX_CONFIG_ID_LEN, MAX_TEXTURES, RETICOLO_DIR
 from .engine import REticoloEngine
 
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parent.parent
-DEFAULT_RETICOLO_DIR = REPO_ROOT / "reticolo_v10" / "reticolo_allege_v10"
-
-
-def _resolve_reticolo_dir() -> Path:
-    """Resolve RETICOLO directory from env var or default."""
-    env = os.environ.get("RETICOLO_MCP_DIR", "")
-    if env:
-        p = Path(env)
-        if p.is_dir():
-            return p
-        print(f"[reticolo-mcp] WARNING: RETICOLO_MCP_DIR={env} not found, "
-              f"falling back to {DEFAULT_RETICOLO_DIR}", file=sys.stderr)
-    return DEFAULT_RETICOLO_DIR
-
-
 mcp = FastMCP("reticolo-mcp")
-engine = REticoloEngine(_resolve_reticolo_dir())
+engine = REticoloEngine(RETICOLO_DIR)
 
 
 # ------------------------------------------------------------------
@@ -99,10 +82,10 @@ def reticolo_solve_point(
     Returns:
         {status, wl_um, nn, R, T, A, energy_sum, passive, solve_time_s, config_id}
     """
-    if len(config_id) > 128:
-        config_id = config_id[:128]
+    if len(config_id) > MAX_CONFIG_ID_LEN:
+        config_id = config_id[:MAX_CONFIG_ID_LEN]
 
-    if len(textures) > 32:
+    if len(textures) > MAX_TEXTURES:
         return {"status": "error", "error_code": "too_many_textures",
                 "detail": f"max 32 textures, got {len(textures)}"}
 
