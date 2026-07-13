@@ -31,23 +31,30 @@ python -m reticolo_mcp.server
 
 ## Configuration
 
-The server expects RETICOLO V10 at `reticolo_v10/reticolo_allege_v10/` relative
-to the repository root. The bundled copy is provided under the CC-BY 4.0 license
-(see NOTICE).
+The server requires an external RETICOLO V10 installation. The bundled
+`reticolo_v10/` directory in the repository is for development only and
+is **not included in the PyPI wheel** (CC-BY 4.0 — separate from the MIT wrapper).
 
-Override the path with `RETICOLO_MCP_DIR`:
+Set the path via environment variable or `--reticolo-dir`:
 ```powershell
 $env:RETICOLO_MCP_DIR = "D:\RETICOLO V10\V10_2025\reticolo_allege_v10"
+# or
+python -m reticolo_mcp.server --reticolo-dir "D:\RETICOLO V10\V10_2025\reticolo_allege_v10"
 ```
 
 ## Tools
 
-| Tool | Description |
-|---|---|
-| `reticolo_start` | Start MATLAB engine, apply disk-safety settings |
-| `reticolo_stop` | Stop engine and release license |
-| `reticolo_status` | Report engine state |
-| `reticolo_solve_point` | Solve one wavelength (R, T, A) |
+| Tool | Status | Description |
+|---|---|---|
+| `reticolo_start` | ⚠ unverified | Start MATLAB engine, acquire lease, apply disk-safety |
+| `reticolo_stop` | ⚠ unverified | Stop engine, release lease, clean scratch |
+| `reticolo_status` | ⚠ unverified | Engine state + lease status |
+| `solver_status` | ✓ read-only | Lease state + COMSOL collision check (no MATLAB) |
+| `reticolo_solve_point` | ⚠ unverified | Solve one wavelength (R, T, A_balance) |
+| `reticolo_sweep` | ⚠ unverified | Resumable wavelength sweep with flush+fsync CSV |
+
+⚠ = requires MATLAB Engine API (not yet installed). All solver tools are
+implemented but unverified against real RETICOLO V10.
 
 ## ⚠ Disk safety
 
