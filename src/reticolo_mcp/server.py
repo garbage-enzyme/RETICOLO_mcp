@@ -1,9 +1,6 @@
 """RETICOLO MCP server — MCP interface for RETICOLO V10 RCWA solver.
 
 Start with: python -m reticolo_mcp.server
-
-Profile detection follows the environment variable:
-  RETICOLO_MCP_PROFILE = core | full  (default: core)
 """
 
 from __future__ import annotations
@@ -25,6 +22,58 @@ engine = REticoloEngine(RETICOLO_DIR)
 
 
 # ------------------------------------------------------------------
+# input validation helpers (P0-4)
+# ------------------------------------------------------------------
+
+def _validate_solve_inputs(
+    wl_um: float,
+    D: list[float],
+    nn: list[int],
+    textures: list,
+    profil: dict,
+    polarization: int,
+    config_id: str,
+) -> dict | None:
+    """Return error dict if inputs fail validation, else None."""
+    if not 0.1 < float(wl_um) < 100.0:
+        return {"status": "error", "error_code": "invalid_wl",
+                "detail": f"wavelength out of range: {wl_um}"}
+    if len(D) not in (1, 2):
+        return {"status": "error", "error_code": "invalid_D",
+                "detail": "D must be [Px] or [Px, Py]"}
+    if not all(v > 0 for v in D):
+        return {"status": "error", "error_code": "invalid_D",
+                "detail": "lattice periods must be positive"}
+    if len(nn) != 2 or not all(isinstance(n, int) and n >= 1 for n in nn):
+        return {"status": "error", "error_code": "invalid_nn",
+                "detail": "nn must be [nx, ny] with positive integers"}
+    if len(textures) > MAX_TEXTURES:
+        return {"status": "error", "error_code": "too_many_textures",
+                "detail": f"max {MAX_TEXTURES} textures, got {len(textures)}"}
+    if polarization not in (-1, 1):
+        return {"status": "error", "error_code": "invalid_polarization",
+                "detail": "polarization must be 1 (TE) or -1 (TM)"}
+    if len(config_id) > MAX_CONFIG_ID_LEN:
+        return {"status": "error", "error_code": "config_id_too_long",
+                "detail": f"config_id max {MAX_CONFIG_ID_LEN} chars"}
+    heights = profil.get("heights", [])
+    indices = profil.get("indices", [])
+    if not heights or not indices:
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "profil must have non-empty heights and indices"}
+    if len(heights) < 2:
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "heights must have at least 2 entries [top, ..., 0]"}
+    if heights[-1] != 0.0:
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "last height must be 0 (semi-infinite substrate)"}
+    if len(heights) != len(indices):
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "heights and indices must have same length"}
+    return None
+
+
+# ------------------------------------------------------------------
 # tools
 # ------------------------------------------------------------------
 
@@ -33,7 +82,7 @@ def reticolo_start() -> dict:
     """Start MATLAB engine and initialize RETICOLO V10.
 
     Applies M0 disk-safety: vmax=inf (no scratch .mat files),
-    MATLAB temp redirected to D:\\matlab_temp, working directory D:\\reticolo_scratch.
+    MATLAB temp redirected, working directory on scratch volume.
     Returns engine status including connection state, uptime, and RETICOLO path.
     """
     return engine.start()
@@ -52,7 +101,7 @@ def reticolo_stop() -> dict:
 def reticolo_status() -> dict:
     """Report MATLAB engine state without side effects.
 
-    Returns connected/stopped, uptime, RETICOLO path, and disk-safety mode.
+    Returns connected/stopped, uptime, RETICOLO path, lease state.
     Does not start MATLAB or mutate any state.
     """
     return engine.status()
@@ -71,25 +120,24 @@ def reticolo_solve_point(
     """Solve a single wavelength point with RETICOLO RCWA.
 
     Args:
-        wl_um: Wavelength in microns.
+        wl_um: Wavelength in microns (0.1 < wl < 100).
         D: Lattice period(s) in um — [Px] for 1D, [Px, Py] for 2D.
-        nn: Fourier truncation orders [nx, ny].
+        nn: Fourier truncation orders [nx, ny] (positive integers).
         textures: Layer materials. Each entry is a refractive index (number)
                   or, for patterned layers, a list [bg_n, [cx,cy,dx,dy,n,k], ...].
         profil: {"heights": [z0, z1, ..., 0], "indices": [i0, i1, ...]}.
-                1-based indices into textures. Last height=0 for semi-inf substrate.
         polarization: 1 for TE, -1 for TM.
         config_id: Optional provenance tag (max 128 chars).
 
     Returns:
-        {status, wl_um, nn, R, T, A, energy_sum, passive, solve_time_s, config_id}
+        {status, wl_um, nn, R, T, A_balance, passive, solve_time_s, config_id}
     """
-    if len(config_id) > MAX_CONFIG_ID_LEN:
-        config_id = config_id[:MAX_CONFIG_ID_LEN]
-
-    if len(textures) > MAX_TEXTURES:
-        return {"status": "error", "error_code": "too_many_textures",
-                "detail": f"max 32 textures, got {len(textures)}"}
+    err = _validate_solve_inputs(
+        wl_um=wl_um, D=D, nn=nn, textures=textures, profil=profil,
+        polarization=polarization, config_id=config_id,
+    )
+    if err:
+        return err
 
     return engine.solve_point(
         wl_um=float(wl_um),
@@ -147,6 +195,14 @@ def reticolo_sweep(
     """
     if engine.status()["status"] != "connected":
         return {"status": "error", "error_code": "engine_not_started"}
+
+    err = _validate_solve_inputs(
+        wl_um=wls_um[0] if wls_um else 5.0,
+        D=D, nn=nn, textures=textures, profil=profil,
+        polarization=polarization, config_id=config_id,
+    )
+    if err:
+        return err
 
     return run_sweep(
         engine=engine,
