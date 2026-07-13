@@ -302,7 +302,8 @@ def _textures_to_cell(eng: Any, matlab: Any, textures: list[Any]) -> Any:
 
     Each entry:
       - number → complex scalar (refractive index n + i*k).
-      - list starting with a number → cell array {bg_n, inc1, inc2, ...}.
+      - list starting with a number → cell array {bg_n, inc1, inc2, ...}
+        where each inclusion is a complex double vector [cx,cy,dx,dy,n,k].
     """
     cell = eng.cell(1, len(textures))
     for i, tex in enumerate(textures):
@@ -313,7 +314,16 @@ def _textures_to_cell(eng: Any, matlab: Any, textures: list[Any]) -> Any:
                 sub = eng.cell(1, len(tex))
                 for j, item in enumerate(tex):
                     if isinstance(item, (list, tuple)):
-                        sub[j] = matlab.double([float(x) for x in item])
+                        has_complex = any(isinstance(x, complex) for x in item)
+                        if has_complex:
+                            sub[j] = matlab.double(
+                                [complex(float(x.real), float(x.imag))
+                                 if isinstance(x, complex) else float(x)
+                                 for x in item],
+                                is_complex=True,
+                            )
+                        else:
+                            sub[j] = matlab.double([float(x) for x in item])
                     else:
                         sub[j] = complex(item)
                 cell[i] = sub
