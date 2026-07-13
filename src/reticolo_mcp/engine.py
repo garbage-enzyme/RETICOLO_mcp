@@ -136,15 +136,6 @@ class REticoloEngine:
             self._engine.eval("parm.res1.trace = 0;", nargout=0)
             self._engine.eval("ro = 0; delta0 = 0;", nargout=0)
 
-            # verify MATLAB's actual tempdir matches what we set
-            self._engine.eval("_actual_tmp = tempdir;", nargout=0)
-            actual = str(self._engine.workspace["_actual_tmp"]).lower()
-            expected = self._matlab_temp.lower()
-            if expected not in actual.replace("\\", "/"):
-                self._engine.eval(
-                    "fprintf(2, 'WARNING: MATLAB tempdir=%s, expected=%s\\n', "
-                    "tempdir, getenv('TMP'));", nargout=0)
-
             return self.status()
         except Exception:
             self._engine = None
@@ -248,13 +239,13 @@ class REticoloEngine:
         try:
             eng = self._engine
 
-            eng.workspace["_wl"] = float(wl_um)
-            eng.workspace["_D"] = matlab.double(D_list)
-            eng.workspace["_nn"] = matlab.int32([nn_int])
-            eng.workspace["_textures"] = _textures_to_cell(eng, matlab, textures)
-            eng.workspace["_heights"] = matlab.double(
+            eng.workspace["py_wl"] = float(wl_um)
+            eng.workspace["py_D"] = matlab.double(D_list)
+            eng.workspace["py_nn"] = matlab.double([nn_int])
+            eng.workspace["py_textures"] = _textures_to_cell(eng, matlab, textures)
+            eng.workspace["py_heights"] = matlab.double(
                 [float(v) for v in profil["heights"]])
-            eng.workspace["_pindices"] = matlab.int32(
+            eng.workspace["py_indices"] = matlab.int32(
                 [[int(v) for v in profil["indices"]]])
 
             # TE (pol=1) and TM (pol=-1) both read from ef.TEinc_top_*
@@ -262,18 +253,18 @@ class REticoloEngine:
             eng.eval(f"parm.sym.pol = {pol};", nargout=0)
 
             eng.eval(
-                "[_aa, ~] = res1(_wl, _D, _textures, _nn, ro, delta0, parm);",
+                "[py_aa, ~] = res1(py_wl, py_D, py_textures, py_nn, ro, delta0, parm);",
                 nargout=0)
             eng.eval(
-                "ef = res2(_aa, {_heights, _pindices});", nargout=0)
+                "ef = res2(py_aa, {py_heights, py_indices});", nargout=0)
             eng.eval(
-                "_R = sum(ef.TEinc_top_reflected.efficiency);", nargout=0)
+                "py_R = sum(ef.TEinc_top_reflected.efficiency);", nargout=0)
             eng.eval(
-                "_T = sum(ef.TEinc_top_transmitted.efficiency);", nargout=0)
-            eng.eval("clear _aa ef;", nargout=0)
+                "py_T = sum(ef.TEinc_top_transmitted.efficiency);", nargout=0)
+            eng.eval("clear py_aa ef;", nargout=0)
 
-            R = float(eng.workspace["_R"])
-            T = float(eng.workspace["_T"])
+            R = float(eng.workspace["py_R"])
+            T = float(eng.workspace["py_T"])
             A_balance = 1.0 - R - T
             dt = round(time.time() - t0, 3)
             passive = bool(0 <= R <= 1 and 0 <= T <= 1 and 0 <= A_balance <= 1)
