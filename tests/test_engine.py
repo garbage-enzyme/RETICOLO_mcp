@@ -72,6 +72,83 @@ class TestEngineLifecycle:
         s = eng.stop()
         assert s["status"] == "stopped"
 
+    def test_stop_does_not_claim_success_when_matlab_quit_fails(self):
+        from reticolo_mcp.engine import REticoloEngine
+        eng = REticoloEngine(Path("/"))
+        owned = MagicMock()
+        owned.quit.side_effect = RuntimeError("quit failed")
+        eng._engine = owned
+        eng._lease_token = "owned-token"
+        with patch("reticolo_mcp.engine.lease_release") as release:
+            result = eng.stop()
+        assert result["status"] == "cleanup_uncertain"
+        assert result["error_code"] == "matlab_quit_failed"
+        assert result["connected"] is True
+        assert eng._engine is owned
+        assert eng._lease_token == "owned-token"
+        release.assert_not_called()
+
+    def test_stop_does_not_claim_success_when_lease_release_fails(self):
+        from reticolo_mcp.engine import REticoloEngine
+        eng = REticoloEngine(Path("/"))
+        owned = MagicMock()
+        eng._engine = owned
+        eng._lease_token = "owned-token"
+        with (
+            patch.object(eng, "_stop_heartbeat"),
+            patch.object(eng, "_start_heartbeat") as restart_heartbeat,
+            patch(
+                "reticolo_mcp.engine.lease_release",
+                return_value={"released": False, "detail": "sharing violation"},
+            ),
+        ):
+            result = eng.stop()
+        assert result["status"] == "cleanup_uncertain"
+        assert result["error_code"] == "lease_release_failed"
+        assert result["connected"] is False
+        assert eng._engine is None
+        assert eng._lease_token == "owned-token"
+        restart_heartbeat.assert_called_once_with()
+
+    def test_failed_start_retains_engine_and_lease_when_quit_fails(
+        self, tmp_path,
+    ):
+        import types
+        from reticolo_mcp.engine import REticoloEngine
+
+        owned = MagicMock()
+        owned.addpath.side_effect = RuntimeError("setup failed")
+        owned.quit.side_effect = RuntimeError("quit failed")
+        matlab_module = types.ModuleType("matlab")
+        matlab_module.__path__ = []
+        matlab_engine_module = types.ModuleType("matlab.engine")
+        matlab_engine_module.start_matlab = MagicMock(return_value=owned)
+        matlab_module.engine = matlab_engine_module
+
+        eng = REticoloEngine(tmp_path)
+        eng._matlab_temp = str(tmp_path / "temp")
+        eng._scratch_dir = str(tmp_path / "scratch")
+        with (
+            patch.dict(
+                sys.modules,
+                {"matlab": matlab_module, "matlab.engine": matlab_engine_module},
+            ),
+            patch("reticolo_mcp.engine._lease_status", return_value={"collision": False}),
+            patch("reticolo_mcp.engine._check_matlab_engine", return_value=""),
+            patch(
+                "reticolo_mcp.engine.lease_acquire",
+                return_value={"acquired": True, "token": "owned-token"},
+            ),
+            patch("reticolo_mcp.engine.lease_release") as release,
+            patch.object(eng, "_start_heartbeat"),
+        ):
+            result = eng.start()
+        assert result["status"] == "cleanup_uncertain"
+        assert result["error_code"] == "startup_matlab_quit_failed"
+        assert eng._engine is owned
+        assert eng._lease_token == "owned-token"
+        release.assert_not_called()
+
     def test_solve_without_engine(self):
         from reticolo_mcp.engine import REticoloEngine
         eng = REticoloEngine(Path("/nonexistent"))

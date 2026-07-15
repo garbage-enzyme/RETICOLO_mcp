@@ -147,51 +147,100 @@ class REticoloEngine:
             self._engine.eval("ro = 0; delta0 = 0;", nargout=0)
 
             return self.status()
-        except Exception:
+        except Exception as exc:
             owned_engine = self._engine
             if owned_engine is not None:
                 try:
                     owned_engine.quit()
-                except Exception:
-                    pass
+                except Exception as cleanup_exc:
+                    return {
+                        "status": "cleanup_uncertain",
+                        "connected": True,
+                        "error_code": "startup_matlab_quit_failed",
+                        "detail": _classify_error(exc),
+                        "cleanup_error": _classify_error(cleanup_exc),
+                    }
             self._engine = None
             self._started_at = None
-            self._stop_heartbeat()
-            token = self._lease_token
-            self._lease_token = ""
-            if token:
-                lease_release(token)
-            raise
+            release = self._release_owned_lease()
+            if not release["released"]:
+                return {
+                    "status": "cleanup_uncertain",
+                    "connected": False,
+                    "error_code": "startup_lease_release_failed",
+                    "detail": _classify_error(exc),
+                    "cleanup_error": release.get("detail", "lease release failed"),
+                }
+            return {
+                "status": "error",
+                "connected": False,
+                "error_code": "engine_start_failed",
+                "detail": _classify_error(exc),
+            }
 
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""
         if self._engine is None:
-            self._stop_heartbeat()
-            token = self._lease_token
-            self._lease_token = ""
-            if token:
-                lease_release(token)
+            release = self._release_owned_lease()
+            if not release["released"]:
+                return {
+                    "status": "cleanup_uncertain",
+                    "connected": False,
+                    "error_code": "lease_release_failed",
+                    "detail": release.get("detail", "lease release failed"),
+                }
             return {"status": "stopped"}
 
+        cleanup_warnings = []
         for cmd in ("retio;", "clear all;"):
             try:
                 self._engine.eval(cmd, nargout=0)
-            except Exception:
-                pass
+            except Exception as exc:
+                cleanup_warnings.append(_classify_error(exc))
 
         try:
             self._engine.quit()
-        except Exception:
-            pass
+        except Exception as exc:
+            return {
+                "status": "cleanup_uncertain",
+                "connected": True,
+                "error_code": "matlab_quit_failed",
+                "detail": _classify_error(exc),
+                "cleanup_warnings": cleanup_warnings,
+            }
 
         self._engine = None
         self._started_at = None
-        self._stop_heartbeat()
+        release = self._release_owned_lease()
+        if not release["released"]:
+            return {
+                "status": "cleanup_uncertain",
+                "connected": False,
+                "error_code": "lease_release_failed",
+                "detail": release.get("detail", "lease release failed"),
+                "cleanup_warnings": cleanup_warnings,
+            }
+        result = {"status": "stopped"}
+        if cleanup_warnings:
+            result["cleanup_warnings"] = cleanup_warnings
+        return result
+
+    def _release_owned_lease(self) -> dict[str, Any]:
+        """Release only the exact owned lease; retain heartbeat on uncertainty."""
         token = self._lease_token
-        self._lease_token = ""
-        if token:
-            lease_release(token)
-        return {"status": "stopped"}
+        if not token:
+            self._stop_heartbeat()
+            return {"released": True, "detail": "no owned lease"}
+        self._stop_heartbeat()
+        try:
+            release = lease_release(token)
+        except Exception as exc:
+            release = {"released": False, "detail": _classify_error(exc)}
+        if release.get("released"):
+            self._lease_token = ""
+            return release
+        self._start_heartbeat()
+        return release
 
     def status(self) -> dict[str, Any]:
         """Return current state without side effects."""
