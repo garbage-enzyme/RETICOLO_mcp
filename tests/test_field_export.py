@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from reticolo_mcp.field_export import (
     _component_index,
+    _resolve_output_dir,
     _validate_field_request,
     _write_field_artifact,
     export_field,
@@ -88,3 +89,27 @@ def test_field_artifact_uses_generated_safe_name_and_hash(tmp_path):
     assert path.name == "field-safe123.npz"
     assert len(digest) == 64
     assert not list(tmp_path.glob("*.tmp.npz"))
+
+
+class TestArtifactPathPolicy:
+    def test_child_path_is_allowed(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        monkeypatch.setattr("reticolo_mcp.field_export.ARTIFACT_ROOT", root)
+        assert _resolve_output_dir(root / "job-1") == (root / "job-1").resolve()
+
+    def test_parent_escape_is_rejected(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        monkeypatch.setattr("reticolo_mcp.field_export.ARTIFACT_ROOT", root)
+        with pytest.raises(ValueError, match="inside"):
+            _resolve_output_dir(root / ".." / "escape")
+
+    def test_unsafe_path_rejected_before_engine_access(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        monkeypatch.setattr("reticolo_mcp.field_export.ARTIFACT_ROOT", root)
+        engine = MagicMock()
+        result = export_field(
+            engine, wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            output_dir=tmp_path / "outside",
+        )
+        assert result["error_code"] == "unsafe_output_path"

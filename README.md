@@ -63,6 +63,9 @@ Synchronous convergence and field export are disabled by default. Development-on
 access requires `RETICOLO_MCP_ENABLE_EXPERIMENTAL=1` followed by an MCP host restart;
 the flag does not promote either tool to verified status.
 
+Field artifacts, when experimental access is enabled, may only be written under
+`RETICOLO_ARTIFACT_DIR` (default: `<runtime>/artifacts`).
+
 ## Verification
 
 | Gate | Evidence |

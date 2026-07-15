@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .engine import _ensure_matlab, _textures_to_cell
+from .config import ARTIFACT_ROOT
 import numpy as np
 
 
@@ -60,6 +61,13 @@ def export_field(
     )
     if validation_error:
         return validation_error
+    try:
+        safe_output_dir = _resolve_output_dir(output_dir)
+    except ValueError as exc:
+        return {
+            "status": "error", "error_code": "unsafe_output_path",
+            "detail": str(exc),
+        }
     if engine._engine is None:
         return {"status": "error", "error_code": "engine_not_started"}
 
@@ -164,8 +172,8 @@ def export_field(
         "solve_time_s": round(time.time() - t0, 1),
     }
 
-    if output_dir:
-        out = Path(output_dir)
+    if safe_output_dir is not None:
+        out = safe_output_dir
         out.mkdir(parents=True, exist_ok=True)
         artifact_id = f"field-{uuid.uuid4().hex[:16]}"
         npz_path, npz_hash = _write_field_artifact(
@@ -227,6 +235,18 @@ def _validate_field_request(
     if polarization != 1:
         return {"status": "error", "error_code": "invalid_polarization"}
     return None
+
+
+def _resolve_output_dir(output_dir: str | Path | None) -> Path | None:
+    if output_dir is None or str(output_dir) == "":
+        return None
+    root = ARTIFACT_ROOT.resolve()
+    candidate = Path(output_dir).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError("output_dir must stay inside RETICOLO_ARTIFACT_DIR")
+    if len(str(candidate)) > 240:
+        raise ValueError("output_dir exceeds safe Windows path length")
+    return candidate
 
 
 def _write_field_artifact(

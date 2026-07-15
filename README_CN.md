@@ -63,6 +63,9 @@ python -m reticolo_mcp.server
 `RETICOLO_MCP_ENABLE_EXPERIMENTAL=1` 后重启 MCP host；该开关不会把工具提升为
 “已验证”。
 
+启用实验性场导出后，artifact 只能写入 `RETICOLO_ARTIFACT_DIR`（默认
+`<runtime>/artifacts`）及其子目录。
+
 ## 验证
 
 | 阶段 | 证据 |

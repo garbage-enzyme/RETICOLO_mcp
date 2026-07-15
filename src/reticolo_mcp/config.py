@@ -53,6 +53,9 @@ else:
     )
 
 LEASE_PATH = RUNTIME_DIR / "reticolo_lease.json"
+ARTIFACT_ROOT = Path(
+    os.environ.get("RETICOLO_ARTIFACT_DIR", str(RUNTIME_DIR / "artifacts"))
+)
 
 # -- limits ---------------------------------------------------------------
 
