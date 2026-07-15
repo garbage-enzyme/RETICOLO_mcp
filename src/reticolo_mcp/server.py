@@ -33,6 +33,7 @@ from . import jobs
 from .convergence import run_convergence
 from .field_export import export_field
 from .capabilities import capability_receipt
+from .resources import ResourcePolicy, evaluate_admission, sample_resources
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
@@ -104,6 +105,23 @@ def _validate_solve_inputs(
 def reticolo_capabilities() -> dict:
     """Return solver-free tool maturity, schema, and deployment identity."""
     return capability_receipt(mcp._tool_manager._tools.keys())
+
+
+@mcp.tool()
+def reticolo_resource_preflight(policy: dict, point_count: int) -> dict:
+    """Evaluate caller-declared resource thresholds without starting MATLAB."""
+    try:
+        parsed = ResourcePolicy.model_validate(policy)
+        snapshot = sample_resources(remaining_wall_s=parsed.wall_budget_s)
+    except Exception as exc:
+        return {
+            "status": "error", "error_code": "invalid_resource_policy",
+            "detail": f"{type(exc).__name__}: {str(exc)[:300]}",
+        }
+    return {
+        "status": "ok", "evidence_kind": "resource_admission_only",
+        **evaluate_admission(parsed, snapshot, point_count=point_count),
+    }
 
 @mcp.tool()
 def reticolo_start() -> dict:

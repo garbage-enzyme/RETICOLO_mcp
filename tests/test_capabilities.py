@@ -15,6 +15,7 @@ def test_receipt_is_solver_free_and_complete():
     assert receipt["matlab_imported"] is False
     assert receipt["tool_count"] == len(receipt["tool_names"])
     assert "reticolo_capabilities" in receipt["tool_names"]
+    assert "reticolo_resource_preflight" in receipt["tool_names"]
     assert set(receipt["tool_names"]) == set(receipt["tool_maturity"])
     assert len(receipt["build_identity_sha256"]) == 64
     assert len(receipt["typed_solve_schema_sha256"]) == 64

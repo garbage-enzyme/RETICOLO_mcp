@@ -15,6 +15,7 @@ from .schema import SolveSpec
 
 TOOL_MATURITY = {
     "reticolo_capabilities": "verified_solver_free",
+    "reticolo_resource_preflight": "verified_solver_free",
     "solver_status": "verified_read_only",
     "reticolo_status": "verified_read_only",
     "reticolo_start": "real_reverification_required",
