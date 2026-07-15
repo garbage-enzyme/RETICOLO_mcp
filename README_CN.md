@@ -66,6 +66,9 @@ python -m reticolo_mcp.server
 启用实验性场导出后，artifact 只能写入 `RETICOLO_ARTIFACT_DIR`（默认
 `<runtime>/artifacts`）及其子目录。
 
+持久化 `job_submit` 必须携带显式资源策略。warning 结果需要使用返回的
+`decision_hash` 再次确认；refuse 结果不会启动 worker。
+
 ## 验证
 
 | 阶段 | 证据 |

@@ -87,6 +87,9 @@ def _job_identity_payload(spec: dict[str, Any]) -> dict[str, Any]:
         or spec.get("config_hash", ""),
         "wls_um": spec.get("wls_um", []),
         "mode": spec.get("mode", "memory"),
+        "resource_policy_hash": (
+            (spec.get("resource_decision") or {}).get("policy_hash", "")
+        ),
     }
 
 
@@ -104,6 +107,8 @@ def create_job_spec(
     config_hash: str = "",
     config_label: str = "",
     mode: str = "memory",
+    resource_policy: dict[str, Any] | None = None,
+    resource_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build and validate an immutable job specification."""
     spec: dict[str, Any] = {
@@ -120,6 +125,8 @@ def create_job_spec(
         "config_hash": config_hash,
         "config_label": config_label,
         "mode": mode,
+        "resource_policy": resource_policy,
+        "resource_decision": resource_decision,
     }
     physical_hash = config_hash or _compute_spec_hash(
         _physical_identity_payload(spec))

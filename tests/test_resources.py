@@ -69,7 +69,9 @@ def test_policy_hash_is_deterministic():
     first = evaluate_admission(_policy(), _snapshot(), point_count=5)
     second = evaluate_admission(_policy(), _snapshot(), point_count=5)
     assert first["policy_hash"] == second["policy_hash"]
+    assert first["decision_hash"] == second["decision_hash"]
     assert len(first["policy_hash"]) == 64
+    assert len(first["decision_hash"]) == 64
 
 
 def test_invalid_threshold_relationship_rejected():

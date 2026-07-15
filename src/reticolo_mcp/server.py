@@ -286,6 +286,8 @@ def job_submit(
     polarization: int = 1,
     config_label: str = "",
     mode: str = "memory",
+    resource_policy: dict | None = None,
+    resource_confirmation: str = "",
 ) -> dict:
     """Submit a durable staged-sweep job. Returns immediately with job_id.
 
@@ -315,11 +317,41 @@ def job_submit(
         if err:
             return err
 
+    if resource_policy is None:
+        return {"status": "error", "error_code": "resource_policy_required"}
+    try:
+        parsed_policy = ResourcePolicy.model_validate(resource_policy)
+        snapshot = sample_resources(remaining_wall_s=parsed_policy.wall_budget_s)
+    except Exception as exc:
+        return {
+            "status": "error", "error_code": "invalid_resource_policy",
+            "detail": f"{type(exc).__name__}: {str(exc)[:300]}",
+        }
+    decision = evaluate_admission(
+        parsed_policy, snapshot, point_count=len(wls_um),
+    )
+    if decision["decision"] == "refuse":
+        return {
+            "status": "error", "error_code": "resource_refused",
+            "resource_decision": decision,
+        }
+    if (
+        decision["decision"] == "warning"
+        and resource_confirmation != decision["decision_hash"]
+    ):
+        return {
+            "status": "error",
+            "error_code": "resource_warning_confirmation_required",
+            "resource_decision": decision,
+        }
+
     job_id = f"job-{uuid.uuid4().hex[:12]}"
     attempt_id = uuid.uuid4().hex
     spec = jobs.create_job_spec(
         wls_um=wls_um, D=D, nn=nn, textures=textures, profil=profil,
         polarization=polarization, config_label=config_label, mode=mode,
+        resource_policy=parsed_policy.model_dump(mode="json"),
+        resource_decision=decision,
     )
     try:
         jobs.write_spec(job_id, spec)
@@ -339,7 +371,8 @@ def job_submit(
     return {"status": "ok", "job_id": job_id,
             "config_hash": spec["config_hash"],
             "total_points": len(wls_um), "attempt_id": attempt_id,
-            "launcher_pid": worker_pid}
+            "launcher_pid": worker_pid,
+            "resource_decision_hash": decision["decision_hash"]}
 
 
 @mcp.tool()

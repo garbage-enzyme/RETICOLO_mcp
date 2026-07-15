@@ -137,6 +137,26 @@ class TestPublicJobControls:
     def _isolated_runtime(self, tmp_path, monkeypatch):
         monkeypatch.setattr("reticolo_mcp.jobs.RUNTIME_DIR", tmp_path)
 
+    def _resource_policy(self):
+        return {
+            "min_available_memory_fraction": 0.1,
+            "warning_available_memory_fraction": 0.2,
+            "min_commit_remaining_fraction": 0.1,
+            "warning_commit_remaining_fraction": 0.2,
+            "min_runtime_free_fraction": 0.1,
+            "warning_runtime_free_fraction": 0.2,
+            "max_points": 10,
+            "wall_budget_s": 3600,
+            "min_next_point_time_s": 60,
+        }
+
+    def _green_snapshot(self):
+        from reticolo_mcp.resources import ResourceSnapshot
+        return ResourceSnapshot(
+            available_memory_fraction=0.5, commit_remaining_fraction=0.5,
+            runtime_free_fraction=0.5, remaining_wall_s=3600,
+        )
+
     @pytest.mark.parametrize("fn", [server.job_status, server.job_cancel, server.job_resume])
     def test_invalid_job_id_is_bounded_error(self, fn):
         result = fn("../escape")
@@ -158,15 +178,41 @@ class TestPublicJobControls:
 
     def test_submit_records_attempt_identity(self, tmp_path, monkeypatch):
         monkeypatch.setattr(server, "_spawn_worker", lambda _job_id: 4321)
+        monkeypatch.setattr(server, "sample_resources", lambda **_kwargs: self._green_snapshot())
         result = server.job_submit(
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            resource_policy=self._resource_policy(),
         )
         assert result["status"] == "ok"
         assert result["attempt_id"]
         state = server.jobs.read_state(result["job_id"])
         assert state["attempt"] == 1
         assert state["attempt_id"] == result["attempt_id"]
+
+    def test_submit_requires_resource_policy(self, monkeypatch):
+        spawn = MagicMock()
+        monkeypatch.setattr(server, "_spawn_worker", spawn)
+        result = server.job_submit(
+            wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "resource_policy_required"
+        spawn.assert_not_called()
+
+    def test_resource_warning_requires_bound_confirmation(self, monkeypatch):
+        from reticolo_mcp.resources import ResourceSnapshot
+        monkeypatch.setattr(server, "sample_resources", lambda **_kwargs: ResourceSnapshot(
+            available_memory_fraction=0.15, commit_remaining_fraction=0.5,
+            runtime_free_fraction=0.5, remaining_wall_s=3600,
+        ))
+        result = server.job_submit(
+            wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            resource_policy=self._resource_policy(),
+        )
+        assert result["error_code"] == "resource_warning_confirmation_required"
+        assert len(result["resource_decision"]["decision_hash"]) == 64
 
     def test_spawn_worker_uses_hidden_window_flag(self, monkeypatch):
         popen = MagicMock()

@@ -60,16 +60,14 @@ def evaluate_admission(
     values = snapshot.model_dump(mode="json")
     missing = sorted(key for key, value in values.items() if value is None)
     if missing:
-        return {
+        return _bind_decision({
             "decision": "refuse", "reason": "required_metric_unavailable",
-            "missing_metrics": missing, "policy_hash": policy_hash,
-            "snapshot": values,
-        }
+            "missing_metrics": missing,
+        }, policy_hash, values)
     if point_count < 1 or point_count > policy.max_points:
-        return {
+        return _bind_decision({
             "decision": "refuse", "reason": "point_limit",
-            "policy_hash": policy_hash, "snapshot": values,
-        }
+        }, policy_hash, values)
 
     refusal_checks = {
         "available_memory": values["available_memory_fraction"] < policy.min_available_memory_fraction,
@@ -79,10 +77,10 @@ def evaluate_admission(
     }
     refused = sorted(key for key, failed in refusal_checks.items() if failed)
     if refused:
-        return {
+        return _bind_decision({
             "decision": "refuse", "reason": "threshold",
-            "failed": refused, "policy_hash": policy_hash, "snapshot": values,
-        }
+            "failed": refused,
+        }, policy_hash, values)
 
     warning_checks = {
         "available_memory": values["available_memory_fraction"] < policy.warning_available_memory_fraction,
@@ -90,11 +88,20 @@ def evaluate_admission(
         "runtime_free": values["runtime_free_fraction"] < policy.warning_runtime_free_fraction,
     }
     warnings = sorted(key for key, failed in warning_checks.items() if failed)
-    return {
+    return _bind_decision({
         "decision": "warning" if warnings else "green",
         "reason": "threshold" if warnings else "all_thresholds_satisfied",
-        "warnings": warnings, "policy_hash": policy_hash, "snapshot": values,
-    }
+        "warnings": warnings,
+    }, policy_hash, values)
+
+
+def _bind_decision(
+    result: dict[str, Any], policy_hash: str, snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    bound = {**result, "policy_hash": policy_hash, "snapshot": snapshot}
+    payload = json.dumps(bound, sort_keys=True, separators=(",", ":"))
+    bound["decision_hash"] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return bound
 
 
 def sample_resources(

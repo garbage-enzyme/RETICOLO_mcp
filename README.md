@@ -66,6 +66,9 @@ the flag does not promote either tool to verified status.
 Field artifacts, when experimental access is enabled, may only be written under
 `RETICOLO_ARTIFACT_DIR` (default: `<runtime>/artifacts`).
 
+Durable `job_submit` requires an explicit resource policy. A warning decision must be
+resubmitted with the returned `decision_hash`; a refusal never launches a worker.
+
 ## Verification
 
 | Gate | Evidence |
