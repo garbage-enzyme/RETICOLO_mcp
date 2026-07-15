@@ -27,6 +27,7 @@ from reticolo_mcp.jobs import (
     read_state,
     results_path,
     write_state,
+    transition_state,
     worker_log_path,
 )
 from reticolo_mcp.engine import REticoloEngine
@@ -95,9 +96,14 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
     attempt = int(submitted_state.get("attempt", 1))
     attempt_id = str(submitted_state.get("attempt_id", ""))
     _log(job_id, f"worker PID={os.getpid()} starting attempt={attempt}")
-    write_state(job_id, {"status": "starting", "worker_pid": os.getpid(),
-                         "attempted_at": time.time(), "attempt": attempt,
-                         "attempt_id": attempt_id})
+    starting = transition_state(
+        job_id, allowed_from={"submitted"}, attempt_id=attempt_id,
+        updates={"status": "starting", "worker_pid": os.getpid(),
+                 "attempted_at": time.time()},
+    )
+    if not starting["updated"]:
+        _log(job_id, f"startup transition refused: {starting['reason']}")
+        return 1
     append_event(job_id, {"event": "worker_starting", "pid": os.getpid(),
                           "attempt": attempt, "attempt_id": attempt_id})
 
@@ -106,18 +112,31 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         mode=spec.get("mode", "memory"), label=f"job:{job_id}",
     )
     if start_r["status"] != "connected":
-        write_state(job_id, {"status": "failed",
-                             "error": f"engine start: {start_r}",
-                             "attempt": attempt, "attempt_id": attempt_id})
+        transition_state(
+            job_id, allowed_from={"starting"}, attempt_id=attempt_id,
+            updates={"status": "failed", "error": f"engine start: {start_r}"},
+        )
         append_event(job_id, {"event": "engine_start_failed",
                               "detail": start_r})
         _log(job_id, f"engine start failed: {start_r}")
         return 1
 
     try:
-        write_state(job_id, {"status": "running", "worker_pid": os.getpid(),
-                             "started_at": time.time(), "attempt": attempt,
-                             "attempt_id": attempt_id})
+        running = transition_state(
+            job_id, allowed_from={"starting"}, attempt_id=attempt_id,
+            updates={"status": "running", "worker_pid": os.getpid(),
+                     "started_at": time.time()},
+        )
+        if not running["updated"]:
+            if _cancel_requested(job_id, attempt_id):
+                transition_state(
+                    job_id, allowed_from={"cancel_requested", "cancelling"},
+                    attempt_id=attempt_id,
+                    updates={"status": "interrupted",
+                             "reason": "cancelled_during_engine_start"},
+                )
+                return 0
+            raise RuntimeError(f"running transition refused: {running['reason']}")
         append_event(job_id, {"event": "sweep_started"})
 
         csv = str(results_path(job_id))
@@ -142,7 +161,11 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         )
 
         if result.get("cancel_observed"):
-            write_state(job_id, {
+            transition_state(
+                job_id,
+                allowed_from={"running", "cancel_requested", "cancelling"},
+                attempt_id=attempt_id,
+                updates={
                 "status": "interrupted",
                 "worker_pid": os.getpid(),
                 "interrupted_at": time.time(),
@@ -151,7 +174,6 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 "skipped": result["skipped"],
                 "errors": result["errors"],
                 "runtime_s": result["runtime_s"],
-                "attempt": attempt, "attempt_id": attempt_id,
             })
             append_event(job_id, {
                 "event": "cancel_observed_at_safe_boundary",
@@ -162,7 +184,8 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             _log(job_id, "cancellation observed at a safe point boundary")
             return 0
 
-        write_state(job_id, {
+        terminal = transition_state(job_id, allowed_from={"running"},
+            attempt_id=attempt_id, updates={
             "status": (
                 "completed" if result["errors"] == 0
                 else "completed_with_errors"
@@ -173,8 +196,17 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             "skipped": result["skipped"],
             "errors": result["errors"],
             "runtime_s": result["runtime_s"],
-            "attempt": attempt, "attempt_id": attempt_id,
         })
+        if not terminal["updated"]:
+            if _cancel_requested(job_id, attempt_id):
+                transition_state(
+                    job_id, allowed_from={"cancel_requested", "cancelling"},
+                    attempt_id=attempt_id,
+                    updates={"status": "interrupted",
+                             "reason": "cancelled_before_terminal_commit"},
+                )
+                return 0
+            raise RuntimeError(f"terminal transition refused: {terminal['reason']}")
         append_event(job_id, {
             "event": "completed",
             "solved": result["solved"],
@@ -187,8 +219,11 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         return 0 if result["errors"] == 0 else 1
 
     except Exception:
-        write_state(job_id, {
-            "status": "failed",
+        transition_state(
+            job_id,
+            allowed_from={"starting", "running", "cancel_requested", "cancelling"},
+            attempt_id=attempt_id,
+            updates={"status": "failed",
             "worker_pid": os.getpid(),
             "error": traceback.format_exc()[-1000:],
         })

@@ -363,11 +363,15 @@ def job_cancel(job_id: str) -> dict:
         return {"status": "error", "error_code": "invalid_job_id"}
     if state is None:
         return {"status": "error", "error_code": "job_not_found"}
-    if state["status"] not in ("running", "starting"):
+    transition = jobs.transition_state(
+        job_id, allowed_from={"running", "starting"},
+        attempt_id=state.get("attempt_id"),
+        updates={"status": "cancel_requested"},
+    )
+    if not transition["updated"]:
+        current = transition.get("state") or state
         return {"status": "error", "error_code": "not_running",
-                "current_status": state["status"]}
-
-    jobs.write_state(job_id, {**state, "status": "cancel_requested"})
+                "current_status": current.get("status")}
     jobs.append_event(job_id, {
         "event": "cancel_requested",
         "attempt": state.get("attempt"),
@@ -385,19 +389,28 @@ def job_resume(job_id: str) -> dict:
         return {"status": "error", "error_code": "invalid_job_id"}
     if state is None:
         return {"status": "error", "error_code": "job_not_found"}
-    if state["status"] in ("running", "starting", "cancel_requested"):
-        return {"status": "error", "error_code": "cannot_resume",
-                "current_status": state["status"]}
     if state["status"] == "completed":
         return {"status": "ok", "message": "job already completed",
                 "job_id": job_id}
 
     attempt = int(state.get("attempt", 0)) + 1
     attempt_id = uuid.uuid4().hex
-    jobs.write_state(job_id, {
-        **state, "status": "submitted", "attempt": attempt,
-        "attempt_id": attempt_id,
-    })
+    transition = jobs.transition_state(
+        job_id,
+        allowed_from={
+            "failed", "interrupted", "completed_with_errors",
+            "cleanup_uncertain", "resource_refused",
+        },
+        attempt_id=state.get("attempt_id"),
+        updates={
+            "status": "submitted", "attempt": attempt,
+            "attempt_id": attempt_id,
+        },
+    )
+    if not transition["updated"]:
+        current = transition.get("state") or state
+        return {"status": "error", "error_code": "cannot_resume",
+                "current_status": current.get("status")}
     jobs.append_event(job_id, {
         "event": "job_resumed", "attempt": attempt,
         "attempt_id": attempt_id,

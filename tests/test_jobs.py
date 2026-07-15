@@ -18,6 +18,7 @@ from reticolo_mcp.jobs import (
     results_path,
     write_spec,
     write_state,
+    transition_state,
     worker_log_path,
 )
 
@@ -105,6 +106,41 @@ class TestJobStore:
     def test_state_reject_invalid_status(self):
         with pytest.raises(ValueError, match="invalid status"):
             write_state(self.job_id, {"status": "nonsense"})
+
+    def test_transition_requires_status_and_attempt(self):
+        write_state(self.job_id, {
+            "status": "running", "attempt_id": "attempt-1", "attempt": 1,
+        })
+        stale = transition_state(
+            self.job_id, allowed_from={"running"}, attempt_id="attempt-old",
+            updates={"status": "cancel_requested"},
+        )
+        assert stale["updated"] is False
+        assert stale["reason"] == "stale_attempt"
+        assert read_state(self.job_id)["status"] == "running"
+
+        valid = transition_state(
+            self.job_id, allowed_from={"running"}, attempt_id="attempt-1",
+            updates={"status": "cancel_requested"},
+        )
+        assert valid["updated"] is True
+        assert read_state(self.job_id)["status"] == "cancel_requested"
+
+    def test_second_transition_cannot_overwrite_first(self):
+        write_state(self.job_id, {
+            "status": "interrupted", "attempt_id": "attempt-1", "attempt": 1,
+        })
+        first = transition_state(
+            self.job_id, allowed_from={"interrupted"}, attempt_id="attempt-1",
+            updates={"status": "submitted", "attempt_id": "attempt-2", "attempt": 2},
+        )
+        second = transition_state(
+            self.job_id, allowed_from={"interrupted"}, attempt_id="attempt-1",
+            updates={"status": "submitted", "attempt_id": "attempt-3", "attempt": 2},
+        )
+        assert first["updated"] is True
+        assert second["updated"] is False
+        assert read_state(self.job_id)["attempt_id"] == "attempt-2"
 
     def test_events_append_and_read(self):
         append_event(self.job_id, {"event": "start"})

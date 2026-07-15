@@ -7,6 +7,7 @@ atomic state, append-only events, and incremental results.
 from __future__ import annotations
 
 import hashlib
+import ctypes
 import json
 import os
 import re
@@ -165,6 +166,40 @@ VALID_STATES = frozenset({
     "completed_with_errors", "failed", "interrupted", "cancel_requested",
     "cancelling", "cancelled", "cleanup_uncertain", "resource_refused",
 })
+
+
+def transition_state(
+    job_id: str, *, allowed_from: set[str] | frozenset[str],
+    updates: dict[str, Any], attempt_id: str | None = None,
+) -> dict[str, Any]:
+    """Conditionally update state under a cross-process Windows named mutex."""
+    mutex_name = "Global\\reticolo_mcp_job_" + hashlib.sha256(
+        _validate_job_id(job_id).encode("utf-8")
+    ).hexdigest()[:24]
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, False, mutex_name)
+    if not mutex:
+        return {"updated": False, "reason": "mutex_create_failed"}
+    acquired = False
+    try:
+        wait_result = kernel32.WaitForSingleObject(mutex, 5000)
+        acquired = wait_result in (0, 0x80)
+        if not acquired:
+            return {"updated": False, "reason": "mutex_timeout"}
+        current = read_state(job_id)
+        if current is None:
+            return {"updated": False, "reason": "job_not_found", "state": None}
+        if attempt_id is not None and current.get("attempt_id") != attempt_id:
+            return {"updated": False, "reason": "stale_attempt", "state": current}
+        if current.get("status") not in allowed_from:
+            return {"updated": False, "reason": "invalid_transition", "state": current}
+        new_state = {**current, **updates}
+        write_state(job_id, new_state)
+        return {"updated": True, "state": new_state}
+    finally:
+        if acquired:
+            kernel32.ReleaseMutex(mutex)
+        kernel32.CloseHandle(mutex)
 
 
 def write_state(job_id: str, state: dict[str, Any]) -> None:
