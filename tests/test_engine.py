@@ -100,6 +100,28 @@ class TestEngineLifecycle:
         assert r["status"] == "error"
         assert r["error_code"] == "reticolo_dir_missing"
 
+    def test_heartbeat_failure_marks_engine_unhealthy(self):
+        from reticolo_mcp.engine import REticoloEngine
+        eng = REticoloEngine(Path("/"))
+        eng._lease_token = "token"
+        eng._heartbeat_stop = MagicMock()
+        eng._heartbeat_stop.wait.side_effect = [False]
+        with patch("reticolo_mcp.engine.lease_heartbeat", return_value=False):
+            eng._heartbeat_loop()
+        assert eng._lease_healthy is False
+
+    def test_solve_refuses_lost_lease(self):
+        from reticolo_mcp.engine import REticoloEngine
+        eng = REticoloEngine(Path("/"))
+        eng._engine = MagicMock()
+        eng._lease_healthy = False
+        result = eng.solve_point(
+            wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["status"] == "error"
+        assert result["error_code"] == "solver_lease_lost"
+
 
 # ------------------------------------------------------------------
 # solve_point input validation

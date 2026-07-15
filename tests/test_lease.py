@@ -68,6 +68,13 @@ class TestLeaseLifecycle:
         r = lease_release()
         assert r["released"] is False
 
+    def test_release_rejects_wrong_token(self):
+        acquired = lease_acquire("test")
+        result = lease_release("wrong-token")
+        assert result["released"] is False
+        assert self.lease_path.exists()
+        assert lease_release(acquired["token"])["released"] is True
+
     def test_status_with_stale_lease(self):
         lease_acquire("test")
         data = '{"schema":"1","owner":"reticolo-mcp","pid":99999,"created_at":0,"label":"dead"}'

@@ -32,7 +32,6 @@ from reticolo_mcp.jobs import (
 from reticolo_mcp.engine import REticoloEngine
 from reticolo_mcp.config import RETICOLO_DIR
 from reticolo_mcp.sweep import run_sweep
-from reticolo_mcp.lease import lease_acquire, lease_release, lease_heartbeat
 
 
 def _to_complex(textures: list[Any]) -> list[Any]:
@@ -97,22 +96,15 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                          "attempted_at": time.time()})
     append_event(job_id, {"event": "worker_starting", "pid": os.getpid()})
 
-    acquired = lease_acquire(f"job:{job_id}", mode=spec.get("mode", "memory"))
-    if not acquired["acquired"]:
-        write_state(job_id, {"status": "failed",
-                             "error": f"lease: {acquired}"})
-        append_event(job_id, {"event": "lease_failed", "detail": acquired})
-        _log(job_id, f"lease failed: {acquired}")
-        return 1
-
     eng = REticoloEngine(RETICOLO_DIR)
-    start_r = eng.start(mode=spec.get("mode", "memory"))
+    start_r = eng.start(
+        mode=spec.get("mode", "memory"), label=f"job:{job_id}",
+    )
     if start_r["status"] != "connected":
         write_state(job_id, {"status": "failed",
                              "error": f"engine start: {start_r}"})
         append_event(job_id, {"event": "engine_start_failed",
                               "detail": start_r})
-        lease_release()
         _log(job_id, f"engine start failed: {start_r}")
         return 1
 
@@ -201,7 +193,6 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             eng.stop()
         except Exception:
             pass
-        lease_release()
         append_event(job_id, {"event": "worker_exited"})
         _log(job_id, "worker exited")
 

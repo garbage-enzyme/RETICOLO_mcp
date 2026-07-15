@@ -29,6 +29,7 @@ RETICOLO conventions enforced here:
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,9 @@ from .config import (
     RETICOLO_SCRATCH_DIR,
 )
 from .lease import (
+    HEARTBEAT_INTERVAL_S,
     lease_acquire,
+    lease_heartbeat,
     lease_release,
     lease_status as _lease_status,
 )
@@ -67,13 +70,18 @@ class REticoloEngine:
         self._matlab_temp: str = str(MATLAB_TEMP_DIR)
         self._scratch_dir: str = str(RETICOLO_SCRATCH_DIR)
         self._lease_token: str = ""
+        self._lease_healthy: bool = True
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
         self._mode: str = "memory"
 
     # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 
-    def start(self, mode: str = "memory") -> dict[str, Any]:
+    def start(
+        self, mode: str = "memory", label: str = "interactive",
+    ) -> dict[str, Any]:
         """Start MATLAB engine, add RETICOLO path, apply M0 disk safety.
 
         Args:
@@ -102,11 +110,13 @@ class REticoloEngine:
             return {"status": "error", "error_code": "reticolo_dir_missing",
                     "detail": str(self._reticolo_dir)}
 
-        acquired = lease_acquire("interactive", mode=mode)
+        acquired = lease_acquire(label, mode=mode)
         if not acquired["acquired"]:
             return {"status": "error", "error_code": "lease_acquire_failed",
                     "detail": acquired}
         self._lease_token = acquired.get("token", "")
+        self._lease_healthy = True
+        self._start_heartbeat()
 
         # P0-7: create dirs and set env before engine start
         Path(self._matlab_temp).mkdir(parents=True, exist_ok=True)
@@ -138,17 +148,29 @@ class REticoloEngine:
 
             return self.status()
         except Exception:
+            owned_engine = self._engine
+            if owned_engine is not None:
+                try:
+                    owned_engine.quit()
+                except Exception:
+                    pass
             self._engine = None
             self._started_at = None
+            self._stop_heartbeat()
+            token = self._lease_token
             self._lease_token = ""
-            lease_release()
+            if token:
+                lease_release(token)
             raise
 
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""
         if self._engine is None:
+            self._stop_heartbeat()
+            token = self._lease_token
             self._lease_token = ""
-            lease_release()
+            if token:
+                lease_release(token)
             return {"status": "stopped"}
 
         for cmd in ("retio;", "clear all;"):
@@ -164,8 +186,11 @@ class REticoloEngine:
 
         self._engine = None
         self._started_at = None
+        self._stop_heartbeat()
+        token = self._lease_token
         self._lease_token = ""
-        lease_release()
+        if token:
+            lease_release(token)
         return {"status": "stopped"}
 
     def status(self) -> dict[str, Any]:
@@ -184,6 +209,7 @@ class REticoloEngine:
             "reticolo_path": str(self._reticolo_dir),
             "scratch_dir": self._scratch_dir,
             "mode": self._mode,
+            "lease_heartbeat_healthy": self._lease_healthy,
             "lease": ls,
         }
 
@@ -218,6 +244,9 @@ class REticoloEngine:
         """
         if self._engine is None:
             return {"status": "error", "error_code": "engine_not_started",
+                    "config_id": config_id}
+        if not self._lease_healthy:
+            return {"status": "error", "error_code": "solver_lease_lost",
                     "config_id": config_id}
 
         D_list = [float(D)] if isinstance(D, (int, float)) else [float(v) for v in D]
@@ -265,6 +294,15 @@ class REticoloEngine:
 
             R = float(eng.workspace["py_R"])
             T = float(eng.workspace["py_T"])
+            if not self._lease_healthy:
+                return {
+                    "status": "error",
+                    "error_code": "solver_lease_lost",
+                    "wl_um": wl_um,
+                    "nn": nn_int,
+                    "polarization": pol,
+                    "config_id": config_id,
+                }
             A_balance = 1.0 - R - T
             dt = round(time.time() - t0, 3)
             passive = bool(0 <= R <= 1 and 0 <= T <= 1 and 0 <= A_balance <= 1)
@@ -291,6 +329,31 @@ class REticoloEngine:
                 "error": _classify_error(exc),
                 "config_id": config_id,
             }
+
+    def _start_heartbeat(self) -> None:
+        """Keep lease ownership fresh while MATLAB calls block this thread."""
+        self._stop_heartbeat()
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name="reticolo-lease-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self) -> None:
+        self._heartbeat_stop.set()
+        thread = self._heartbeat_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        self._heartbeat_thread = None
+
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(HEARTBEAT_INTERVAL_S):
+            token = self._lease_token
+            if not token or not lease_heartbeat(token):
+                self._lease_healthy = False
+                return
 
 
 # ------------------------------------------------------------------

@@ -223,12 +223,14 @@ def lease_heartbeat(token: str) -> bool:
     return True
 
 
-def lease_release() -> dict[str, Any]:
-    """Release the solver lease if we own it."""
+def lease_release(token: str | None = None) -> dict[str, Any]:
+    """Release the solver lease if PID and optional owner token match."""
     our = _read_lease(LEASE_PATH)
     if our is None:
         return {"released": False, "detail": "no active lease"}
     if our.get("pid") != os.getpid():
         return {"released": False, "detail": "lease owned by another process"}
+    if token is not None and our.get("token") != token:
+        return {"released": False, "detail": "lease token mismatch"}
     LEASE_PATH.unlink(missing_ok=True)
     return {"released": True}
