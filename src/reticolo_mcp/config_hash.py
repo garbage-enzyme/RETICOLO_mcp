@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from typing import Any
 
 
@@ -77,9 +78,17 @@ def normalize_textures(textures: list[Any]) -> list[Any]:
                 material = [material_re, material_im]
             else:
                 raise ValueError("inclusion must have 6 fields")
+            cx_value = _finite_real(cx, "cx")
+            cy_value = _finite_real(cy, "cy")
+            dx_value = _finite_real(dx, "dx")
+            dy_value = _finite_real(dy, "dy")
+            if dx_value <= 0 or dy_value <= 0:
+                raise ValueError("inclusion dimensions must be positive")
+            if isinstance(slices, bool) or not isinstance(slices, int) or slices < 1:
+                raise ValueError("inclusion slices must be a positive integer")
             patterned.append([
-                float(cx), float(cy), float(dx), float(dy),
-                _complex_pair(material), int(slices),
+                cx_value, cy_value, dx_value, dy_value,
+                _complex_pair(material), slices,
             ])
         result.append(patterned)
     return result
@@ -105,7 +114,19 @@ def _complex_pair(value: Any) -> list[float]:
         c = complex(float(value[0]), float(value[1]))
     else:
         c = complex(value)
-    return [float(c.real), float(c.imag)]
+    pair = [float(c.real), float(c.imag)]
+    if not all(math.isfinite(part) for part in pair):
+        raise ValueError("complex texture value must be finite")
+    return pair
+
+
+def _finite_real(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be a real number")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{label} must be finite")
+    return result
 
 
 def _normalize_materials(materials: list[dict[str, Any]]) -> list[dict[str, Any]]:

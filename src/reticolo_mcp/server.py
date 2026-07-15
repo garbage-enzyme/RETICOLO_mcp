@@ -28,7 +28,7 @@ from .config import (
 from .engine import REticoloEngine
 from .lease import lease_status as _lease_status
 from .sweep import run_sweep
-from .config_hash import compute_config_hash
+from .config_hash import compute_config_hash, normalize_textures
 from . import jobs
 from .convergence import run_convergence
 from .field_export import export_field
@@ -53,35 +53,68 @@ def _validate_solve_inputs(
     config_id: str,
 ) -> dict | None:
     """Return error dict if inputs fail validation, else None."""
-    if not 0.1 < float(wl_um) < 100.0:
+    if isinstance(wl_um, bool) or not isinstance(wl_um, (int, float)):
+        return {"status": "error", "error_code": "invalid_wl",
+                "detail": "wavelength must be a finite real number"}
+    wl_value = float(wl_um)
+    if not math.isfinite(wl_value) or not 0.1 < wl_value < 100.0:
         return {"status": "error", "error_code": "invalid_wl",
                 "detail": f"wavelength out of range: {wl_um}"}
+    if not isinstance(D, list):
+        return {"status": "error", "error_code": "invalid_D",
+                "detail": "D must be a list"}
     if len(D) not in (1, 2):
         return {"status": "error", "error_code": "invalid_D",
                 "detail": "D must be [Px] or [Px, Py]"}
-    if not all(v > 0 for v in D):
+    if not all(
+        not isinstance(v, bool) and isinstance(v, (int, float))
+        and math.isfinite(float(v)) and float(v) > 0
+        for v in D
+    ):
         return {"status": "error", "error_code": "invalid_D",
-                "detail": "lattice periods must be positive"}
-    if len(nn) != 2 or not all(isinstance(n, int) and n >= 1 for n in nn):
+                "detail": "lattice periods must be positive finite numbers"}
+    if not isinstance(nn, list) or len(nn) != 2 or not all(
+        type(n) is int and n >= 1 for n in nn
+    ):
         return {"status": "error", "error_code": "invalid_nn",
                 "detail": "nn must be [nx, ny] with positive integers"}
     if any(n > MAX_FOURIER_ORDER for n in nn):
         return {"status": "error", "error_code": "order_limit_exceeded",
                 "detail": f"maximum Fourier order is {MAX_FOURIER_ORDER}"}
+    if not isinstance(textures, list) or not textures:
+        return {"status": "error", "error_code": "invalid_textures",
+                "detail": "textures must be a non-empty list"}
     if len(textures) > MAX_TEXTURES:
         return {"status": "error", "error_code": "too_many_textures",
                 "detail": f"max {MAX_TEXTURES} textures, got {len(textures)}"}
+    try:
+        normalize_textures(textures)
+    except (TypeError, ValueError, OverflowError) as exc:
+        return {"status": "error", "error_code": "invalid_textures",
+                "detail": str(exc)[:300]}
+    if isinstance(polarization, bool) or not isinstance(polarization, int):
+        return {"status": "error", "error_code": "invalid_polarization",
+                "detail": "polarization must be an integer"}
     if polarization == -1:
         return {"status": "error", "error_code": "unsupported_polarization",
                 "detail": "TM result-channel mapping is not release accepted"}
     if polarization != 1:
         return {"status": "error", "error_code": "invalid_polarization",
                 "detail": "verified public polarization is currently 1 (TE)"}
+    if not isinstance(config_id, str):
+        return {"status": "error", "error_code": "invalid_config_id",
+                "detail": "config_id must be a string"}
     if len(config_id) > MAX_CONFIG_ID_LEN:
         return {"status": "error", "error_code": "config_id_too_long",
                 "detail": f"config_id max {MAX_CONFIG_ID_LEN} chars"}
-    heights = profil.get("heights", [])
-    indices = profil.get("indices", [])
+    if not isinstance(profil, dict) or set(profil) != {"heights", "indices"}:
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "profil must contain exactly heights and indices"}
+    heights = profil["heights"]
+    indices = profil["indices"]
+    if not isinstance(heights, list) or not isinstance(indices, list):
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "profil heights and indices must be lists"}
     if not heights or not indices:
         return {"status": "error", "error_code": "invalid_profil",
                 "detail": "profil must have non-empty heights and indices"}
@@ -94,6 +127,19 @@ def _validate_solve_inputs(
     if len(heights) != len(indices):
         return {"status": "error", "error_code": "invalid_profil",
                 "detail": "heights and indices must have same length"}
+    if not all(
+        not isinstance(value, bool) and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        for value in heights
+    ):
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "profile heights must be finite real numbers"}
+    if not all(
+        type(value) is int and 1 <= value <= len(textures)
+        for value in indices
+    ):
+        return {"status": "error", "error_code": "invalid_profil",
+                "detail": "profile indices must reference 1-based textures"}
     return None
 
 

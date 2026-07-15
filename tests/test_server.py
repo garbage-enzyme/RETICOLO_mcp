@@ -36,6 +36,10 @@ class TestValidateSolveInputs:
         assert err is not None
         assert err["error_code"] == "invalid_wl"
 
+    @pytest.mark.parametrize("value", ["5.0", True, float("nan"), float("inf")])
+    def test_wl_rejects_coercion_and_nonfinite_values(self, value):
+        assert self._valid(wl_um=value)["error_code"] == "invalid_wl"
+
     def test_D_empty(self):
         err = self._valid(D=[])
         assert err is not None
@@ -55,6 +59,10 @@ class TestValidateSolveInputs:
         err = self._valid(D=[-1.0])
         assert err is not None
         assert err["error_code"] == "invalid_D"
+
+    @pytest.mark.parametrize("value", ["bad", [True], [float("nan")]])
+    def test_D_rejects_wrong_type_and_nonfinite_values(self, value):
+        assert self._valid(D=value)["error_code"] == "invalid_D"
 
     def test_rectangular_D_valid(self):
         assert self._valid(D=[1.0, 2.0]) is None
@@ -78,6 +86,9 @@ class TestValidateSolveInputs:
         err = self._valid(nn=[1.5, 5])
         assert err is not None
         assert err["error_code"] == "invalid_nn"
+
+    def test_nn_rejects_bool(self):
+        assert self._valid(nn=[True, 5])["error_code"] == "invalid_nn"
 
     def test_nn_over_hard_limit(self):
         err = self._valid(nn=[64, 5])
@@ -130,6 +141,33 @@ class TestValidateSolveInputs:
         err = self._valid(textures=[1.0] * (MAX_TEXTURES + 1))
         assert err is not None
         assert err["error_code"] == "too_many_textures"
+
+    @pytest.mark.parametrize(
+        "textures",
+        [
+            [],
+            [float("nan")],
+            [[1.0, [0.0, 0.0, -0.3, 0.3, 4.0, 1]]],
+            [[1.0, [0.0, 0.0, 0.3, 0.3, 4.0, 1.5]]],
+        ],
+    )
+    def test_invalid_texture_shapes_fail_closed(self, textures):
+        assert self._valid(textures=textures)["error_code"] == "invalid_textures"
+
+    @pytest.mark.parametrize(
+        "profil",
+        [
+            {"heights": [0.1, float("inf")], "indices": [1, 1]},
+            {"heights": [0.1, 0], "indices": [True, 1]},
+            {"heights": [0.1, 0], "indices": [1, 2]},
+            {"heights": [0.1, 0], "indices": [1, 1], "extra": 1},
+        ],
+    )
+    def test_invalid_profile_values_fail_closed(self, profil):
+        assert self._valid(profil=profil)["error_code"] == "invalid_profil"
+
+    def test_config_id_rejects_non_string(self):
+        assert self._valid(config_id=123)["error_code"] == "invalid_config_id"
 
 
 class TestPublicJobControls:
