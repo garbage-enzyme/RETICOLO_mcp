@@ -20,6 +20,44 @@ from reticolo_mcp.schema import (
 )
 
 
+def _valid_solve_payload() -> dict:
+    return {
+        "wl_um": 5.0,
+        "lattice": {"px_um": 1.0, "py_um": 1.0},
+        "nn": [5, 5],
+        "materials": [{"type": "constant_n", "re": 1.0, "im": 0.0}],
+        "textures": [{"material_id": 0}],
+        "profile": {"layers": [{"material_id": 0, "thickness_um": 1.0}]},
+    }
+
+
+class TestStrictContracts:
+    def test_unknown_field_rejected(self):
+        payload = _valid_solve_payload()
+        payload["unexpected"] = True
+        with pytest.raises(ValidationError, match="extra_forbidden"):
+            SolveSpec.model_validate(payload)
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+    def test_nonfinite_wavelength_rejected(self, value):
+        payload = _valid_solve_payload()
+        payload["wl_um"] = value
+        with pytest.raises(ValidationError):
+            SolveSpec.model_validate(payload)
+
+    def test_missing_material_reference_rejected(self):
+        payload = _valid_solve_payload()
+        payload["textures"] = [{"material_id": 1}]
+        with pytest.raises(ValidationError, match="missing material"):
+            SolveSpec.model_validate(payload)
+
+    def test_missing_texture_reference_rejected(self):
+        payload = _valid_solve_payload()
+        payload["profile"]["layers"][0]["material_id"] = 1
+        with pytest.raises(ValidationError, match="missing texture"):
+            SolveSpec.model_validate(payload)
+
+
 class TestComplexMaterials:
     def test_constant_n(self):
         m = ConstantN(re=4.0, im=0.001)

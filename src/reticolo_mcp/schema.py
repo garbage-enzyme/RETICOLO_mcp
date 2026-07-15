@@ -11,10 +11,17 @@ from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     field_validator,
     model_validator,
 )
+
+
+class StrictModel(BaseModel):
+    """Base for public contracts: reject unknown and non-finite input."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 # ------------------------------------------------------------------
@@ -22,7 +29,7 @@ from pydantic import (
 # ------------------------------------------------------------------
 
 
-class ComplexNumber(BaseModel):
+class ComplexNumber(StrictModel):
     """Complex number as real/imaginary pair."""
     re: float
     im: float = 0.0
@@ -36,21 +43,21 @@ class ComplexNumber(BaseModel):
 # ------------------------------------------------------------------
 
 
-class ConstantN(BaseModel):
+class ConstantN(StrictModel):
     """Constant refractive index n + i*k."""
     type: Literal["constant_n"] = "constant_n"
     re: float
     im: float = 0.0
 
 
-class ConstantEps(BaseModel):
+class ConstantEps(StrictModel):
     """Constant permittivity epsilon' + i*epsilon''."""
     type: Literal["constant_eps"] = "constant_eps"
     re: float
     im: float = 0.0
 
 
-class Drude(BaseModel):
+class Drude(StrictModel):
     """Drude model: eps_inf - wp^2 / (omega*(omega - i*gamma)).
 
     gamma > 0 for passive convention (exp(-i*omega*t)).
@@ -69,7 +76,7 @@ MaterialDef = ConstantN | ConstantEps | Drude
 # ------------------------------------------------------------------
 
 
-class Inclusion(BaseModel):
+class Inclusion(StrictModel):
     """Rectangular/elliptical inclusion in a patterned layer.
 
     RETICOLO convention: [cx, cy, full_dx, full_dy, n, k]
@@ -90,12 +97,12 @@ class Inclusion(BaseModel):
         return v
 
 
-class UniformTexture(BaseModel):
+class UniformTexture(StrictModel):
     """Uniform layer: a single material."""
     material_id: Annotated[int, Field(ge=0)]
 
 
-class PatternedTexture(BaseModel):
+class PatternedTexture(StrictModel):
     """Patterned layer: background material + list of inclusions."""
     background_id: Annotated[int, Field(ge=0)]
     inclusions: list[Inclusion] = Field(default_factory=list, max_length=64)
@@ -104,13 +111,13 @@ class PatternedTexture(BaseModel):
 TextureDef = UniformTexture | PatternedTexture
 
 
-class ProfileLayer(BaseModel):
+class ProfileLayer(StrictModel):
     """A single layer in the profile: texture ref + height in um."""
     material_id: Annotated[int, Field(ge=0)]
     thickness_um: Annotated[float, Field(gt=0)]
 
 
-class Profile(BaseModel):
+class Profile(StrictModel):
     """Layer stack profile, top to bottom. Last layer is semi-infinite substrate."""
     layers: Annotated[list[ProfileLayer], Field(min_length=1, max_length=32)]
 
@@ -150,7 +157,7 @@ class Profile(BaseModel):
 # ------------------------------------------------------------------
 
 
-class Excitation(BaseModel):
+class Excitation(StrictModel):
     """Incident wave excitation parameters."""
     polarization: Literal["TE", "TM"] = "TE"
     theta_deg: Annotated[float, Field(ge=-90, le=90)] = 0.0
@@ -166,7 +173,7 @@ class Excitation(BaseModel):
 # ------------------------------------------------------------------
 
 
-class Lattice(BaseModel):
+class Lattice(StrictModel):
     """Lattice periods in um."""
     px_um: Annotated[float, Field(gt=0)]
     py_um: Annotated[float | None, Field(default=None, gt=0)] = None
@@ -182,7 +189,7 @@ class Lattice(BaseModel):
 # ------------------------------------------------------------------
 
 
-class SolveSpec(BaseModel):
+class SolveSpec(StrictModel):
     """Complete specification for one RETICOLO solve point."""
     wl_um: Annotated[float, Field(gt=0)]
     lattice: Lattice
@@ -190,7 +197,7 @@ class SolveSpec(BaseModel):
     materials: Annotated[list[MaterialDef], Field(min_length=1, max_length=32)]
     textures: Annotated[list[TextureDef], Field(min_length=1, max_length=32)]
     profile: Profile
-    excitation: Excitation = Excitation()
+    excitation: Excitation = Field(default_factory=Excitation)
     config_label: str = ""
 
     @field_validator("nn")
@@ -207,3 +214,28 @@ class SolveSpec(BaseModel):
         if not (0.1 < v < 100.0):
             raise ValueError(f"wavelength out of range: {v}")
         return v
+
+    @model_validator(mode="after")
+    def validate_references(self) -> "SolveSpec":
+        material_count = len(self.materials)
+        for texture_index, texture in enumerate(self.textures):
+            if isinstance(texture, UniformTexture):
+                material_ids = [texture.material_id]
+            else:
+                material_ids = [texture.background_id]
+                material_ids.extend(i.material_id for i in texture.inclusions)
+            for material_id in material_ids:
+                if material_id >= material_count:
+                    raise ValueError(
+                        f"texture {texture_index} references missing material "
+                        f"{material_id}"
+                    )
+
+        texture_count = len(self.textures)
+        for layer_index, layer in enumerate(self.profile.layers):
+            if layer.material_id >= texture_count:
+                raise ValueError(
+                    f"profile layer {layer_index} references missing texture "
+                    f"{layer.material_id}"
+                )
+        return self
