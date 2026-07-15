@@ -9,8 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -19,20 +21,43 @@ from .config import RUNTIME_DIR
 SCHEMA_VERSION = "1"
 MAX_SPEC_BYTES = 256 * 1024
 MAX_JOB_ID_LEN = 128
+MAX_EVENT_TAIL = 100
+_JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    """Write JSON via temp file + os.replace."""
+    """Write JSON via a flushed temporary file and atomic replacement."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True),
-                   encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+        with open(tmp, "x", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
-def _ensure_job_dir(job_id: str) -> Path:
-    """Create and return the job directory."""
-    root = RUNTIME_DIR / "jobs" / job_id
-    root.mkdir(parents=True, exist_ok=True)
+def _validate_job_id(job_id: str) -> str:
+    """Validate an opaque job identifier without touching the filesystem."""
+    if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+        raise ValueError("invalid job_id")
+    if job_id in {".", ".."} or Path(job_id).is_absolute():
+        raise ValueError("invalid job_id")
+    return job_id
+
+
+def _job_dir(job_id: str, *, create: bool = False) -> Path:
+    """Resolve a contained job directory; reads never create it."""
+    safe_id = _validate_job_id(job_id)
+    jobs_root = (RUNTIME_DIR / "jobs").resolve()
+    root = (jobs_root / safe_id).resolve()
+    if root.parent != jobs_root:
+        raise ValueError("job_id escapes runtime root")
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
     return root
 
 
@@ -41,6 +66,31 @@ def _compute_spec_hash(spec: dict[str, Any]) -> str:
     canonical = json.dumps(spec, sort_keys=True, ensure_ascii=True,
                            separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _physical_identity_payload(spec: dict[str, Any]) -> dict[str, Any]:
+    """Return only normalized physical inputs for canonical configuration identity."""
+    return {
+        "schema": spec.get("schema", SCHEMA_VERSION),
+        "D": spec.get("D", []),
+        "nn": spec.get("nn", []),
+        "textures": spec.get("textures", []),
+        "profil_heights": spec.get("profil_heights", []),
+        "profil_indices": spec.get("profil_indices", []),
+        "polarization": spec.get("polarization", 1),
+    }
+
+
+def _job_identity_payload(spec: dict[str, Any]) -> dict[str, Any]:
+    """Return immutable job semantics, excluding timestamps and human labels."""
+    return {
+        "schema": spec.get("schema", SCHEMA_VERSION),
+        "job_type": spec.get("job_type", "staged_sweep"),
+        "physical_config_hash": spec.get("physical_config_hash")
+        or spec.get("config_hash", ""),
+        "wls_um": spec.get("wls_um", []),
+        "mode": spec.get("mode", "memory"),
+    }
 
 
 # ------------------------------------------------------------------
@@ -59,7 +109,7 @@ def create_job_spec(
     mode: str = "memory",
 ) -> dict[str, Any]:
     """Build and validate an immutable job specification."""
-    spec = {
+    spec: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "job_type": "staged_sweep",
         "created_at": time.time(),
@@ -74,8 +124,12 @@ def create_job_spec(
         "config_label": config_label,
         "mode": mode,
     }
-    if not spec["config_hash"]:
-        spec["config_hash"] = _compute_spec_hash(spec)
+    physical_hash = config_hash or _compute_spec_hash(
+        _physical_identity_payload(spec))
+    spec["physical_config_hash"] = physical_hash
+    job_hash = _compute_spec_hash(_job_identity_payload(spec))
+    spec["job_spec_hash"] = job_hash
+    spec["config_hash"] = job_hash  # compatibility alias used by sweep rows
 
     payload = json.dumps(spec, sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_SPEC_BYTES:
@@ -85,12 +139,14 @@ def create_job_spec(
 
 def write_spec(job_id: str, spec: dict[str, Any]) -> Path:
     """Persist the immutable spec. Raises if spec already exists and differs."""
-    root = _ensure_job_dir(job_id)
+    root = _job_dir(job_id, create=True)
     spec_path = root / "spec.json"
     if spec_path.exists():
         existing = json.loads(spec_path.read_text(encoding="utf-8"))
-        existing_hash = _compute_spec_hash(existing)
-        new_hash = _compute_spec_hash(spec)
+        existing_hash = existing.get("job_spec_hash") or _compute_spec_hash(
+            _job_identity_payload(existing))
+        new_hash = spec.get("job_spec_hash") or _compute_spec_hash(
+            _job_identity_payload(spec))
         if existing_hash != new_hash:
             raise ValueError(
                 f"job {job_id}: spec changed. existing={existing_hash[:12]} "
@@ -102,7 +158,7 @@ def write_spec(job_id: str, spec: dict[str, Any]) -> Path:
 
 def read_spec(job_id: str) -> dict[str, Any] | None:
     """Read an existing job spec."""
-    path = _ensure_job_dir(job_id) / "spec.json"
+    path = _job_dir(job_id) / "spec.json"
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -114,7 +170,8 @@ def read_spec(job_id: str) -> dict[str, Any] | None:
 
 VALID_STATES = frozenset({
     "submitted", "starting", "running", "completed",
-    "failed", "interrupted", "cancel_requested",
+    "completed_with_errors", "failed", "interrupted", "cancel_requested",
+    "cancelling", "cancelled", "cleanup_uncertain", "resource_refused",
 })
 
 
@@ -122,15 +179,15 @@ def write_state(job_id: str, state: dict[str, Any]) -> None:
     """Atomically write current job state."""
     s = {k: v for k, v in state.items()}
     s.setdefault("status", "submitted")
-    s.setdefault("updated_at", time.time())
+    s["updated_at"] = time.time()
     if s["status"] not in VALID_STATES:
         raise ValueError(f"invalid status: {s['status']}")
-    _atomic_write_json(_ensure_job_dir(job_id) / "state.json", s)
+    _atomic_write_json(_job_dir(job_id, create=True) / "state.json", s)
 
 
 def read_state(job_id: str) -> dict[str, Any] | None:
     """Read current job state."""
-    path = _ensure_job_dir(job_id) / "state.json"
+    path = _job_dir(job_id) / "state.json"
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -144,7 +201,7 @@ def append_event(job_id: str, event: dict[str, Any]) -> None:
     """Append one event to the job journal, flushed and fsynced."""
     event.setdefault("timestamp", time.time())
     event.setdefault("event_id", uuid.uuid4().hex[:12])
-    path = _ensure_job_dir(job_id) / "events.jsonl"
+    path = _job_dir(job_id, create=True) / "events.jsonl"
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(event, sort_keys=True) + "\n")
         f.flush()
@@ -153,12 +210,21 @@ def append_event(job_id: str, event: dict[str, Any]) -> None:
 
 def read_events(job_id: str, tail: int = 50) -> list[dict[str, Any]]:
     """Return the last N events."""
-    path = _ensure_job_dir(job_id) / "events.jsonl"
+    if isinstance(tail, bool) or not isinstance(tail, int):
+        raise ValueError("tail must be an integer")
+    tail = max(0, min(tail, MAX_EVENT_TAIL))
+    if tail == 0:
+        return []
+    path = _job_dir(job_id) / "events.jsonl"
     if not path.exists():
         return []
-    lines = path.read_text(encoding="utf-8").strip().split("\n")
+    lines: deque[str] = deque(maxlen=tail)
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                lines.append(line)
     events = []
-    for line in lines[-tail:]:
+    for line in lines:
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
@@ -171,11 +237,11 @@ def read_events(job_id: str, tail: int = 50) -> list[dict[str, Any]]:
 # ------------------------------------------------------------------
 
 def results_path(job_id: str) -> Path:
-    return _ensure_job_dir(job_id) / "results.csv"
+    return _job_dir(job_id, create=True) / "results.csv"
 
 
 def worker_log_path(job_id: str) -> Path:
-    return _ensure_job_dir(job_id) / "worker.log"
+    return _job_dir(job_id, create=True) / "worker.log"
 
 
 # ------------------------------------------------------------------
