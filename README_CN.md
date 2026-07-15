@@ -59,6 +59,10 @@ python -m reticolo_mcp.server
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
 历史基准证据，不会自动把当前所有工具版本提升为“已验证”。
 
+同步收敛和场导出默认禁用。仅开发用途可设置
+`RETICOLO_MCP_ENABLE_EXPERIMENTAL=1` 后重启 MCP host；该开关不会把工具提升为
+“已验证”。
+
 ## 验证
 
 | 阶段 | 证据 |

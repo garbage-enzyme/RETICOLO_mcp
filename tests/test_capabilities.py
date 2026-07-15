@@ -18,6 +18,7 @@ def test_receipt_is_solver_free_and_complete():
     assert set(receipt["tool_names"]) == set(receipt["tool_maturity"])
     assert len(receipt["build_identity_sha256"]) == 64
     assert len(receipt["typed_solve_schema_sha256"]) == 64
+    assert receipt["experimental_enabled"] is False
 
 
 def test_unknown_tool_is_not_silently_promoted():

@@ -60,3 +60,7 @@ MAX_CONFIG_ID_LEN = 128
 MAX_TEXTURES = 32
 MAX_ERROR_CHARS = 500
 MAX_JOB_POINTS = 2048
+
+EXPERIMENTAL_ENABLED = os.environ.get(
+    "RETICOLO_MCP_ENABLE_EXPERIMENTAL", ""
+).strip().lower() in {"1", "true", "yes"}

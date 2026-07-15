@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import __version__
 from .config import (
+    EXPERIMENTAL_ENABLED,
     MAX_CONFIG_ID_LEN,
     MAX_JOB_POINTS,
     MAX_TEXTURES,
@@ -466,6 +467,11 @@ def reticolo_convergence(
 
     Requires engine to be connected (call reticolo_start first).
     """
+    if not EXPERIMENTAL_ENABLED:
+        return {
+            "status": "error", "error_code": "experimental_tool_disabled",
+            "detail": "set RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host",
+        }
     err = _validate_solve_inputs(
         wl_um=coarse_start, D=D, nn=nn, textures=textures,
         profil=profil, polarization=polarization, config_id=config_label,
@@ -512,6 +518,11 @@ def reticolo_field_export(
     field max/min, and writes NPZ + JSON summary if output_dir provided.
     Does NOT return large arrays through MCP — use output_dir.
     """
+    if not EXPERIMENTAL_ENABLED:
+        return {
+            "status": "error", "error_code": "experimental_tool_disabled",
+            "detail": "set RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host",
+        }
     return export_field(
         engine=engine,
         wl_um=wl_um, D=D, nn=nn,

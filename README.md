@@ -59,6 +59,10 @@ Use `reticolo_capabilities` as the live maturity and deployment receipt. Histori
 real-engine results below remain fixture evidence; they do not promote every current
 tool revision to verified status.
 
+Synchronous convergence and field export are disabled by default. Development-only
+access requires `RETICOLO_MCP_ENABLE_EXPERIMENTAL=1` followed by an MCP host restart;
+the flag does not promote either tool to verified status.
+
 ## Verification
 
 | Gate | Evidence |

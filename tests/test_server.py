@@ -170,3 +170,27 @@ class TestPublicJobControls:
         monkeypatch.setattr(server.subprocess, "CREATE_NO_WINDOW", 0x08000000)
         assert server._spawn_worker("job-abc") == 9876
         assert popen.call_args.kwargs["creationflags"] == 0x08000000
+
+
+class TestExperimentalGates:
+    def test_convergence_disabled_by_default(self):
+        result = server.reticolo_convergence(
+            coarse_start=5.0, coarse_end=5.1, D=[1.0], nn=[5, 7],
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "experimental_tool_disabled"
+
+    def test_field_disabled_by_default(self):
+        result = server.reticolo_field_export(
+            wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "experimental_tool_disabled"
+
+    def test_enabled_field_still_validates_before_engine(self, monkeypatch):
+        monkeypatch.setattr(server, "EXPERIMENTAL_ENABLED", True)
+        result = server.reticolo_field_export(
+            wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]}, component="bad",
+        )
+        assert result["error_code"] == "invalid_field_component"

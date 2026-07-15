@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import __version__
+from .config import EXPERIMENTAL_ENABLED
 from .schema import SolveSpec
 
 
@@ -47,6 +48,7 @@ def capability_receipt(tool_names: Iterable[str]) -> dict[str, Any]:
         "tool_count": len(names),
         "tool_names": names,
         "tool_maturity": maturity,
+        "experimental_enabled": EXPERIMENTAL_ENABLED,
         "matlab_imported": "matlab" in sys.modules or "matlab.engine" in sys.modules,
         "known_limitations": [
             "TM channel mapping is not release accepted",
