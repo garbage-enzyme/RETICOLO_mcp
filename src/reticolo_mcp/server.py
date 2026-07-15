@@ -489,9 +489,6 @@ def reticolo_field_export(
     field max/min, and writes NPZ + JSON summary if output_dir provided.
     Does NOT return large arrays through MCP — use output_dir.
     """
-    if engine.status()["status"] != "connected":
-        return {"status": "error", "error_code": "engine_not_started"}
-
     return export_field(
         engine=engine,
         wl_um=wl_um, D=D, nn=nn,

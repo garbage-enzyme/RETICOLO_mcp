@@ -7,12 +7,21 @@ filters to a slice plane, and exports bounded coordinate+value arrays.
 from __future__ import annotations
 
 import json
+import hashlib
+import math
+import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from .engine import _ensure_matlab, _textures_to_cell
 import numpy as np
+
+
+ALLOWED_COMPONENTS = frozenset({"Ex", "Ey", "Ez", "Hx", "Hy", "Hz", "normE", "normH"})
+ALLOWED_SLICE_AXES = frozenset({"x", "y", "z"})
+HARD_MAX_FIELD_POINTS = 500_000
 
 
 def export_field(
@@ -44,6 +53,13 @@ def export_field(
         Summary with point count, coordinate bounds, max/min values,
         and export file paths.
     """
+    validation_error = _validate_field_request(
+        wl_um=wl_um, D=D, nn=nn, component=component,
+        slice_axis=slice_axis, slice_value=slice_value,
+        slice_tol=slice_tol, max_points=max_points,
+    )
+    if validation_error:
+        return validation_error
     if engine._engine is None:
         return {"status": "error", "error_code": "engine_not_started"}
 
@@ -90,7 +106,20 @@ def export_field(
         return {"status": "error", "error_code": "field_export_failed",
                 "error": str(exc)[:500]}
 
+    x_raw = x_raw.reshape(-1)
+    y_raw = y_raw.reshape(-1)
+    z_raw = z_raw.reshape(-1)
+    if e_raw.ndim != 2 or e_raw.shape[1] < 6:
+        return {"status": "error", "error_code": "invalid_field_shape"}
     total_points = len(x_raw)
+    if not (len(y_raw) == len(z_raw) == total_points == e_raw.shape[0]):
+        return {"status": "error", "error_code": "field_coordinate_shape_mismatch"}
+    if not (
+        np.isfinite(x_raw).all() and np.isfinite(y_raw).all()
+        and np.isfinite(z_raw).all() and np.isfinite(e_raw.real).all()
+        and np.isfinite(e_raw.imag).all()
+    ):
+        return {"status": "error", "error_code": "nonfinite_field_data"}
     if total_points > max_points:
         return {"status": "error", "error_code": "too_many_points",
                 "total_points": total_points, "max_points": max_points}
@@ -105,13 +134,12 @@ def export_field(
                 "slice_axis": slice_axis, "slice_value": slice_value,
                 "coord_range": [float(coord_vals.min()), float(coord_vals.max())]}
 
-    comp_idx = _component_index(component)
-    field = e_raw[mask, comp_idx] if comp_idx < e_raw.shape[1] else np.abs(e_raw[mask, :]).max(axis=1) if component == "normE" else np.zeros(mask.sum())
-
     if component == "normE":
         field = np.sqrt(np.sum(np.abs(e_raw[mask, 0:3]) ** 2, axis=1))
     elif component == "normH":
         field = np.sqrt(np.sum(np.abs(e_raw[mask, 3:6]) ** 2, axis=1))
+    else:
+        field = e_raw[mask, _component_index(component)]
 
     slice_x = x_raw[mask]
     slice_y = y_raw[mask]
@@ -139,17 +167,17 @@ def export_field(
     if output_dir:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
-        npz_path = out / f"field_{config_label or 'export'}.npz"
-        np.savez_compressed(
-            npz_path,
-            x=slice_x, y=slice_y, z=slice_z,
-            field=np.abs(field),
-            field_complex=field if np.any(np.iscomplex(field)) else np.abs(field),
+        artifact_id = f"field-{uuid.uuid4().hex[:16]}"
+        npz_path, npz_hash = _write_field_artifact(
+            out, artifact_id, x=slice_x, y=slice_y, z=slice_z, field=field,
         )
-        summary_path = out / f"field_{config_label or 'export'}_summary.json"
-        summary_path.write_text(json.dumps(result, indent=2, default=str))
+        result["artifact_id"] = artifact_id
+        result["artifact_sha256"] = npz_hash
+        result["visual_review_state"] = "visual_review_required"
         result["npz_path"] = str(npz_path)
+        summary_path = out / f"{artifact_id}_summary.json"
         result["summary_path"] = str(summary_path)
+        _atomic_write_json(summary_path, result)
 
     return result
 
@@ -160,4 +188,69 @@ def _component_index(name: str) -> int:
     RETICOLO e array order: [Ex, Ey, Ez, Hx, Hy, Hz]
     """
     mapping = {"Ex": 0, "Ey": 1, "Ez": 2, "Hx": 3, "Hy": 4, "Hz": 5}
-    return mapping.get(name, 0)
+    if name not in mapping:
+        raise ValueError(f"unsupported field component: {name}")
+    return mapping[name]
+
+
+def _validate_field_request(
+    *, wl_um: float, D: list[float], nn: list[int], component: str,
+    slice_axis: str, slice_value: float, slice_tol: float, max_points: int,
+) -> dict[str, Any] | None:
+    values = [wl_um, slice_value, slice_tol, *D]
+    try:
+        finite = all(math.isfinite(float(v)) for v in values)
+    except (TypeError, ValueError):
+        finite = False
+    if not finite:
+        return {"status": "error", "error_code": "nonfinite_field_request"}
+    if float(wl_um) <= 0 or not D or any(float(v) <= 0 for v in D):
+        return {"status": "error", "error_code": "invalid_field_geometry"}
+    if len(nn) != 2 or any(isinstance(v, bool) or not isinstance(v, int) or v < 1 for v in nn):
+        return {"status": "error", "error_code": "invalid_field_order"}
+    if component not in ALLOWED_COMPONENTS:
+        return {"status": "error", "error_code": "invalid_field_component"}
+    if slice_axis not in ALLOWED_SLICE_AXES:
+        return {"status": "error", "error_code": "invalid_slice_axis"}
+    if slice_tol <= 0:
+        return {"status": "error", "error_code": "invalid_slice_tolerance"}
+    if isinstance(max_points, bool) or not isinstance(max_points, int) or not (
+        1 <= max_points <= HARD_MAX_FIELD_POINTS
+    ):
+        return {
+            "status": "error", "error_code": "invalid_max_points",
+            "hard_max_points": HARD_MAX_FIELD_POINTS,
+        }
+    return None
+
+
+def _write_field_artifact(
+    output_dir: Path, artifact_id: str, *, x: np.ndarray, y: np.ndarray,
+    z: np.ndarray, field: np.ndarray,
+) -> tuple[Path, str]:
+    final_path = output_dir / f"{artifact_id}.npz"
+    temp_path = output_dir / f".{artifact_id}.{uuid.uuid4().hex[:8]}.tmp.npz"
+    try:
+        np.savez_compressed(
+            temp_path, x=x, y=y, z=z, field=np.abs(field),
+            field_complex=field if np.iscomplexobj(field) else np.abs(field),
+        )
+        with open(temp_path, "r+b") as f:
+            os.fsync(f.fileno())
+        os.replace(temp_path, final_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+    digest = hashlib.sha256(final_path.read_bytes()).hexdigest()
+    return final_path, digest
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        with open(temp_path, "x", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
