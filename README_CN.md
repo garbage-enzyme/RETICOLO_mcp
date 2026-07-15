@@ -46,21 +46,18 @@ python -m reticolo_mcp.server
 
 | 工具 | 状态 | 说明 |
 |---|---|---|
-| `solver_status` | ✓ | 只读租约状态 + COMSOL 碰撞检测（无需 MATLAB） |
-| `reticolo_start` | ✓ | 启动 MATLAB 引擎，获取租约，应用磁盘安全策略 |
-| `reticolo_stop` | ✓ | 停止引擎，释放租约，清理临时文件 |
-| `reticolo_status` | ✓ | 引擎状态 + 租约状态 |
-| `reticolo_solve_point` | ✓ | 单波长求解，返回 R / T / A_balance / 被动性 |
-| `reticolo_sweep` | ✓ | 可恢复波长扫描，flus+fyncs CSV，config_hash 恢复 |
-| `reticolo_convergence` | ✓ | 渐进阶数扫描，峰值跟踪，FWHM，Q 值 |
-| `reticolo_field_export` | ✓ | 场数据导出（retchamp），切片平面，NPZ 输出 |
-| `job_submit` | ✓ | 提交持久化分阶段扫描作业 |
-| `job_status` | ✓ | 作业状态与进度 |
-| `job_tail` | ✓ | 作业事件日志最近 N 条 |
-| `job_cancel` | ✓ | 协同取消请求（在两点之间检查，不中断 `res1`） |
-| `job_resume` | ✓ | 恢复失败/中断的作业 |
+| `reticolo_capabilities` | 已验证（无需求解器） | 工具成熟度、schema 与构建身份 |
+| `solver_status` | 已验证（只读） | 租约状态 + COMSOL 碰撞检测 |
+| `reticolo_status` | 已验证（只读） | 引擎句柄与租约状态 |
+| `reticolo_start` / `reticolo_stop` | 需要重新实测 | v0.2 开发中生命周期已修改 |
+| `reticolo_solve_point` | 仅 TE 基准 | 单波长原始 R/T 与派生 A_balance |
+| `reticolo_sweep` | 实验性 | 带完整文件身份校验的可恢复扫描 |
+| `job_submit/status/tail/cancel/resume` | 实验性 | 真实重启验收尚未执行 |
+| `reticolo_convergence` | 实验性 | 尚不能作为支路收敛证据 |
+| `reticolo_field_export` | 当前 V10 路径不可用 | 当前 retchamp 基准会失败 |
 
-✓ = 已通过 RETICOLO V10 + MATLAB R2025b 真机验证（2026-07-13）。
+实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
+历史基准证据，不会自动把当前所有工具版本提升为“已验证”。
 
 ## 验证
 
@@ -70,8 +67,7 @@ python -m reticolo_mcp.server
 | G1 — M0 资源控制 | nn=9×2 + nn=15×1 点，C 盘 Δ=0 GB，无 `retXXXX` 残留 |
 | G2 — 数值基准 | TE 介质平板 n=1.5：R=0.147929 vs 理论值 0.1479（误差 0.03%）；损耗材料被动性验证通过 |
 | G3 — 持久作业 | Worker 产出与 G2 完全一致；恢复跳过已完成行 |
-| 单元测试 | 133 passed（导入安全、配置、schema、引擎、租约、扫描、作业、哈希、收敛、场导出、worker、server） |
-| G0 — 引擎生命周期 | 启动 → 健康检查 → 停止，无 MATLAB 进程泄漏，无临时文件残留（MCP 验证 2026-07-13） |
+| 历史单元测试基准 | v0.2 开发修改前 133 passed |
 | M3 — 高阶冒烟 | nn=21（32s）+ nn=31（261s），内存模式稳定，无 OOM |
 | M4 — Scratch 模式 | 求解正确，结果与内存模式一致 |
 

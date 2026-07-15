@@ -25,7 +25,7 @@ def test_import_safety():
         from reticolo_mcp import __version__
         from reticolo_mcp.engine import REticoloEngine
 
-        assert __version__ == "0.1.0"
+        assert __version__ == "0.2.0.dev1"
         assert "matlab" not in sys.modules
 
 

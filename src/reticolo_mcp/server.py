@@ -30,6 +30,7 @@ from .config_hash import compute_config_hash
 from . import jobs
 from .convergence import run_convergence
 from .field_export import export_field
+from .capabilities import capability_receipt
 
 mcp = FastMCP("reticolo-mcp")
 engine = REticoloEngine(RETICOLO_DIR)
@@ -90,6 +91,11 @@ def _validate_solve_inputs(
 # ------------------------------------------------------------------
 # tools
 # ------------------------------------------------------------------
+
+@mcp.tool()
+def reticolo_capabilities() -> dict:
+    """Return solver-free tool maturity, schema, and deployment identity."""
+    return capability_receipt(mcp._tool_manager._tools.keys())
 
 @mcp.tool()
 def reticolo_start() -> dict:

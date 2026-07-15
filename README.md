@@ -45,21 +45,19 @@ python -m reticolo_mcp.server
 
 | Tool | Status | Description |
 |---|---|---|
-| `solver_status` | ✓ | Lease state + COMSOL collision check (read-only, no MATLAB) |
-| `reticolo_start` | ✓ | Start MATLAB engine, acquire lease, M0 disk-safety |
-| `reticolo_stop` | ✓ | Stop engine, release lease, clean scratch |
-| `reticolo_status` | ✓ | Engine state + lease status |
-| `reticolo_solve_point` | ✓ | One wavelength → R, T, A_balance, passive |
-| `reticolo_sweep` | ✓ | Resumable sweep, flush+fsync CSV, config_hash resume |
-| `reticolo_convergence` | ✓ | Progressive nn scan, peak tracking, FWHM, Q |
-| `reticolo_field_export` | ✓ | Field export via retchamp, slice-plane, NPZ output |
-| `job_submit` | ✓ | Submit durable staged-sweep job |
-| `job_status` | ✓ | Read job state + progress |
-| `job_tail` | ✓ | Last N events from job journal |
-| `job_cancel` | ✓ | Cooperative cancel request (between solve points) |
-| `job_resume` | ✓ | Resume failed/interrupted job |
+| `reticolo_capabilities` | Verified solver-free | Tool maturity, schemas, build identity |
+| `solver_status` | Verified read-only | Lease state + COMSOL collision check |
+| `reticolo_status` | Verified read-only | Engine handle + lease status |
+| `reticolo_start` / `reticolo_stop` | Reverification required | Lifecycle changed in v0.2 development |
+| `reticolo_solve_point` | TE fixture only | One wavelength to raw R/T and derived A_balance |
+| `reticolo_sweep` | Experimental | Resumable sweep with full-file identity validation |
+| `job_submit/status/tail/cancel/resume` | Experimental | Durable controls; real restart gate pending |
+| `reticolo_convergence` | Experimental | Not accepted as branch-aware convergence evidence |
+| `reticolo_field_export` | Unavailable on failing V10 path | Current retchamp fixture fails upstream |
 
-✓ = verified against real RETICOLO V10 + MATLAB R2025b (2026-07-13).
+Use `reticolo_capabilities` as the live maturity and deployment receipt. Historical
+real-engine results below remain fixture evidence; they do not promote every current
+tool revision to verified status.
 
 ## Verification
 
@@ -69,8 +67,7 @@ python -m reticolo_mcp.server
 | G1 — M0 resource | nn=9×2 + nn=15×1, C: Δ=0 GB, no `retXXXX` orphans, memory mode |
 | G2 — Numerical baseline | TE slab n=1.5: R=0.147929 vs analytical 0.1479 (0.03% err); lossy slab passive ✓ |
 | G3 — Durable jobs | Worker → results match G2; resume skips completed rows |
-| Unit tests | 133 passed (import safety, config, schema, engine, lease, sweep, jobs, hash, convergence, field_export, worker, server) |
-| G0 — Engine lifecycle | Start → health → stop, no MATLAB leak, no orphans (MCP verified 2026-07-13) |
+| Historical unit baseline | 133 passed before v0.2 development changes |
 | M3 — High-order smoke | nn=21 (32s) + nn=31 (261s), memory-mode stable, no OOM |
 | M4 — Scratch mode | solves correctly, matches memory-mode results |
 

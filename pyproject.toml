@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reticolo-mcp"
-version = "0.1.0"
+version = "0.2.0.dev1"
 description = "MCP server for RETICOLO V10 RCWA solver via MATLAB Engine API"
 readme = "README.md"
 license = {text = "MIT"}
