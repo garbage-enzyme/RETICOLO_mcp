@@ -77,3 +77,21 @@ class TestCancelControl:
     def test_missing_state(self, monkeypatch):
         monkeypatch.setattr("reticolo_mcp.worker.read_state", lambda _job_id: None)
         assert _cancel_requested("job-abc") is False
+
+    def test_stale_attempt_cancel_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {
+                "status": "cancel_requested", "attempt_id": "new-attempt",
+            },
+        )
+        assert _cancel_requested("job-abc", "old-attempt") is False
+
+    def test_matching_attempt_cancel_is_observed(self, monkeypatch):
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {
+                "status": "cancel_requested", "attempt_id": "attempt-1",
+            },
+        )
+        assert _cancel_requested("job-abc", "attempt-1") is True

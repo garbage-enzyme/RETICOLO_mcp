@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import MagicMock
 
+from reticolo_mcp import server
 from reticolo_mcp.server import _validate_solve_inputs
 
 
@@ -118,3 +120,48 @@ class TestValidateSolveInputs:
         err = self._valid(textures=[1.0] * (MAX_TEXTURES + 1))
         assert err is not None
         assert err["error_code"] == "too_many_textures"
+
+
+class TestPublicJobControls:
+    @pytest.fixture(autouse=True)
+    def _isolated_runtime(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("reticolo_mcp.jobs.RUNTIME_DIR", tmp_path)
+
+    @pytest.mark.parametrize("fn", [server.job_status, server.job_cancel, server.job_resume])
+    def test_invalid_job_id_is_bounded_error(self, fn):
+        result = fn("../escape")
+        assert result == {"status": "error", "error_code": "invalid_job_id"}
+
+    def test_invalid_tail_is_bounded_error(self):
+        result = server.job_tail("job-abc", n="many")
+        assert result == {"status": "error", "error_code": "invalid_tail"}
+
+    def test_submit_validates_before_spawn(self, monkeypatch):
+        spawn = MagicMock()
+        monkeypatch.setattr(server, "_spawn_worker", spawn)
+        result = server.job_submit(
+            wls_um=[], D=[1.0], nn=[3, 3], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "empty_job"
+        spawn.assert_not_called()
+
+    def test_submit_records_attempt_identity(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(server, "_spawn_worker", lambda _job_id: 4321)
+        result = server.job_submit(
+            wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["status"] == "ok"
+        assert result["attempt_id"]
+        state = server.jobs.read_state(result["job_id"])
+        assert state["attempt"] == 1
+        assert state["attempt_id"] == result["attempt_id"]
+
+    def test_spawn_worker_uses_hidden_window_flag(self, monkeypatch):
+        popen = MagicMock()
+        popen.return_value.pid = 9876
+        monkeypatch.setattr(server.subprocess, "Popen", popen)
+        monkeypatch.setattr(server.subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        assert server._spawn_worker("job-abc") == 9876
+        assert popen.call_args.kwargs["creationflags"] == 0x08000000

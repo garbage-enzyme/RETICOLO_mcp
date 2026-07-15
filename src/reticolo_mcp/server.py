@@ -6,6 +6,7 @@ Start with: python -m reticolo_mcp.server
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -16,7 +17,12 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from . import __version__
-from .config import MAX_CONFIG_ID_LEN, MAX_TEXTURES, RETICOLO_DIR
+from .config import (
+    MAX_CONFIG_ID_LEN,
+    MAX_JOB_POINTS,
+    MAX_TEXTURES,
+    RETICOLO_DIR,
+)
 from .engine import REticoloEngine
 from .lease import lease_status as _lease_status
 from .sweep import run_sweep
@@ -254,7 +260,31 @@ def job_submit(
     The worker runs independently in a detached process. Use job_status
     and job_tail to monitor progress.
     """
+    if not wls_um:
+        return {"status": "error", "error_code": "empty_job"}
+    if len(wls_um) > MAX_JOB_POINTS:
+        return {
+            "status": "error", "error_code": "too_many_points",
+            "max_points": MAX_JOB_POINTS, "requested_points": len(wls_um),
+        }
+    if mode not in {"memory", "scratch"}:
+        return {"status": "error", "error_code": "invalid_mode"}
+    try:
+        nonfinite = any(not math.isfinite(float(w)) for w in wls_um)
+    except (TypeError, ValueError):
+        return {"status": "error", "error_code": "invalid_wavelength"}
+    if nonfinite:
+        return {"status": "error", "error_code": "nonfinite_wavelength"}
+    for wl in wls_um:
+        err = _validate_solve_inputs(
+            wl_um=wl, D=D, nn=nn, textures=textures, profil=profil,
+            polarization=polarization, config_id=config_label,
+        )
+        if err:
+            return err
+
     job_id = f"job-{uuid.uuid4().hex[:12]}"
+    attempt_id = uuid.uuid4().hex
     spec = jobs.create_job_spec(
         wls_um=wls_um, D=D, nn=nn, textures=textures, profil=profil,
         polarization=polarization, config_label=config_label, mode=mode,
@@ -265,30 +295,29 @@ def job_submit(
         return {"status": "error", "error_code": "spec_rejected",
                 "detail": str(exc)}
 
-    jobs.write_state(job_id, {"status": "submitted"})
-    jobs.append_event(job_id, {"event": "job_submitted"})
+    jobs.write_state(job_id, {
+        "status": "submitted", "attempt": 1, "attempt_id": attempt_id,
+    })
+    jobs.append_event(job_id, {
+        "event": "job_submitted", "attempt": 1, "attempt_id": attempt_id,
+    })
 
-    worker_script = str(Path(__file__).resolve().parent / "worker.py")
-    env = os.environ.copy()
-    src_dir = str(Path(__file__).resolve().parent.parent)
-    existing_path = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_path}" if existing_path else src_dir
-    subprocess.Popen(
-        [sys.executable, worker_script, job_id],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        env=env,
-    )
+    worker_pid = _spawn_worker(job_id)
 
     return {"status": "ok", "job_id": job_id,
             "config_hash": spec["config_hash"],
-            "total_points": len(wls_um)}
+            "total_points": len(wls_um), "attempt_id": attempt_id,
+            "launcher_pid": worker_pid}
 
 
 @mcp.tool()
 def job_status(job_id: str) -> dict:
     """Report durable job state. Read-only, no side effects."""
-    state = jobs.read_state(job_id)
-    spec = jobs.read_spec(job_id)
+    try:
+        state = jobs.read_state(job_id)
+        spec = jobs.read_spec(job_id)
+    except ValueError:
+        return {"status": "error", "error_code": "invalid_job_id"}
     if state is None:
         return {"status": "error", "error_code": "job_not_found"}
     return {
@@ -302,8 +331,12 @@ def job_status(job_id: str) -> dict:
 @mcp.tool()
 def job_tail(job_id: str, n: int = 20) -> dict:
     """Return the last N events from a job. Read-only."""
-    events = jobs.read_events(job_id, tail=n)
-    state = jobs.read_state(job_id)
+    try:
+        events = jobs.read_events(job_id, tail=n)
+        state = jobs.read_state(job_id)
+    except ValueError as exc:
+        code = "invalid_tail" if "tail" in str(exc) else "invalid_job_id"
+        return {"status": "error", "error_code": code}
     return {"job_id": job_id, "events": events,
             "state": state}
 
@@ -315,7 +348,10 @@ def job_cancel(job_id: str) -> dict:
     The worker checks for cancellation between solve points.
     This is cooperative; it cannot interrupt a running res1 call.
     """
-    state = jobs.read_state(job_id)
+    try:
+        state = jobs.read_state(job_id)
+    except ValueError:
+        return {"status": "error", "error_code": "invalid_job_id"}
     if state is None:
         return {"status": "error", "error_code": "job_not_found"}
     if state["status"] not in ("running", "starting"):
@@ -323,14 +359,21 @@ def job_cancel(job_id: str) -> dict:
                 "current_status": state["status"]}
 
     jobs.write_state(job_id, {**state, "status": "cancel_requested"})
-    jobs.append_event(job_id, {"event": "cancel_requested"})
+    jobs.append_event(job_id, {
+        "event": "cancel_requested",
+        "attempt": state.get("attempt"),
+        "attempt_id": state.get("attempt_id"),
+    })
     return {"status": "ok", "job_id": job_id, "cancel_requested": True}
 
 
 @mcp.tool()
 def job_resume(job_id: str) -> dict:
     """Resume a failed or interrupted job. Starts a new worker."""
-    state = jobs.read_state(job_id)
+    try:
+        state = jobs.read_state(job_id)
+    except ValueError:
+        return {"status": "error", "error_code": "invalid_job_id"}
     if state is None:
         return {"status": "error", "error_code": "job_not_found"}
     if state["status"] in ("running", "starting", "cancel_requested"):
@@ -340,20 +383,39 @@ def job_resume(job_id: str) -> dict:
         return {"status": "ok", "message": "job already completed",
                 "job_id": job_id}
 
-    jobs.write_state(job_id, {**state, "status": "submitted"})
-    jobs.append_event(job_id, {"event": "job_resumed"})
+    attempt = int(state.get("attempt", 0)) + 1
+    attempt_id = uuid.uuid4().hex
+    jobs.write_state(job_id, {
+        **state, "status": "submitted", "attempt": attempt,
+        "attempt_id": attempt_id,
+    })
+    jobs.append_event(job_id, {
+        "event": "job_resumed", "attempt": attempt,
+        "attempt_id": attempt_id,
+    })
 
+    worker_pid = _spawn_worker(job_id)
+    return {
+        "status": "ok", "job_id": job_id, "resumed": True,
+        "attempt": attempt, "attempt_id": attempt_id,
+        "launcher_pid": worker_pid,
+    }
+
+
+def _spawn_worker(job_id: str) -> int:
+    """Launch one hidden detached worker and return the launcher PID."""
     worker_script = str(Path(__file__).resolve().parent / "worker.py")
     env = os.environ.copy()
     src_dir = str(Path(__file__).resolve().parent.parent)
     existing_path = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_path}" if existing_path else src_dir
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, worker_script, job_id],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    return {"status": "ok", "job_id": job_id, "resumed": True}
+    return int(proc.pid)
 
 
 @mcp.tool()

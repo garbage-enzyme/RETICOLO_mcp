@@ -91,10 +91,15 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
     # ------------------------------------------------------------------
     # startup
     # ------------------------------------------------------------------
-    _log(job_id, f"worker PID={os.getpid()} starting")
+    submitted_state = read_state(job_id) or {}
+    attempt = int(submitted_state.get("attempt", 1))
+    attempt_id = str(submitted_state.get("attempt_id", ""))
+    _log(job_id, f"worker PID={os.getpid()} starting attempt={attempt}")
     write_state(job_id, {"status": "starting", "worker_pid": os.getpid(),
-                         "attempted_at": time.time()})
-    append_event(job_id, {"event": "worker_starting", "pid": os.getpid()})
+                         "attempted_at": time.time(), "attempt": attempt,
+                         "attempt_id": attempt_id})
+    append_event(job_id, {"event": "worker_starting", "pid": os.getpid(),
+                          "attempt": attempt, "attempt_id": attempt_id})
 
     eng = REticoloEngine(RETICOLO_DIR)
     start_r = eng.start(
@@ -102,7 +107,8 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
     )
     if start_r["status"] != "connected":
         write_state(job_id, {"status": "failed",
-                             "error": f"engine start: {start_r}"})
+                             "error": f"engine start: {start_r}",
+                             "attempt": attempt, "attempt_id": attempt_id})
         append_event(job_id, {"event": "engine_start_failed",
                               "detail": start_r})
         _log(job_id, f"engine start failed: {start_r}")
@@ -110,7 +116,8 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
 
     try:
         write_state(job_id, {"status": "running", "worker_pid": os.getpid(),
-                             "started_at": time.time()})
+                             "started_at": time.time(), "attempt": attempt,
+                             "attempt_id": attempt_id})
         append_event(job_id, {"event": "sweep_started"})
 
         csv = str(results_path(job_id))
@@ -131,7 +138,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             config_hash=spec.get("config_hash", ""),
             csv_path=csv,
             resume=True,
-            should_cancel=lambda: _cancel_requested(job_id),
+            should_cancel=lambda: _cancel_requested(job_id, attempt_id),
         )
 
         if result.get("cancel_observed"):
@@ -144,6 +151,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 "skipped": result["skipped"],
                 "errors": result["errors"],
                 "runtime_s": result["runtime_s"],
+                "attempt": attempt, "attempt_id": attempt_id,
             })
             append_event(job_id, {
                 "event": "cancel_observed_at_safe_boundary",
@@ -165,6 +173,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             "skipped": result["skipped"],
             "errors": result["errors"],
             "runtime_s": result["runtime_s"],
+            "attempt": attempt, "attempt_id": attempt_id,
         })
         append_event(job_id, {
             "event": "completed",
@@ -197,10 +206,12 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         _log(job_id, "worker exited")
 
 
-def _cancel_requested(job_id: str) -> bool:
+def _cancel_requested(job_id: str, attempt_id: str = "") -> bool:
     """Return True only for the active job's durable cancel request."""
     state = read_state(job_id)
-    return bool(state and state.get("status") in {"cancel_requested", "cancelling"})
+    if not state or state.get("status") not in {"cancel_requested", "cancelling"}:
+        return False
+    return not attempt_id or state.get("attempt_id") == attempt_id
 
 
 def _setup_logging(job_id: str) -> None:
