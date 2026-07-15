@@ -155,8 +155,15 @@ def run_convergence(
     }
 
 
-def _estimate_fwhm(csv_path: Path) -> float | None:
-    """Estimate FWHM in nm from a fine sweep CSV by half-max interpolation."""
+def _estimate_fwhm(
+    csv_path: Path, *, baseline_rule: str = "absolute_zero",
+) -> float | None:
+    """Estimate FWHM only when both sides of the actual peak are bracketed.
+
+    ``absolute_zero`` uses A_peak/2. ``edge_min`` uses the lower scan edge as
+    a declared local baseline. The nearest crossing on each side of the global
+    peak is used; row-list midpoint is never a proxy for peak position.
+    """
     rows = []
     try:
         import csv
@@ -175,30 +182,41 @@ def _estimate_fwhm(csv_path: Path) -> float | None:
         return None
 
     rows.sort()
-    max_A = max(a for _, a in rows)
+    peak_index = max(range(len(rows)), key=lambda i: rows[i][1])
+    if peak_index == 0 or peak_index == len(rows) - 1:
+        return None
+    max_A = rows[peak_index][1]
     if max_A <= 0:
         return None
-    half = max_A / 2
+    if baseline_rule == "absolute_zero":
+        baseline = 0.0
+    elif baseline_rule == "edge_min":
+        baseline = min(rows[0][1], rows[-1][1])
+    else:
+        raise ValueError(f"unsupported baseline_rule: {baseline_rule}")
+    if baseline >= max_A:
+        return None
+    threshold = baseline + (max_A - baseline) / 2
 
-    left = right = None
-    for i in range(len(rows) - 1):
+    left = _nearest_crossing(rows, threshold, range(peak_index - 1, -1, -1))
+    right = _nearest_crossing(rows, threshold, range(peak_index, len(rows) - 1))
+    if left is None or right is None or right <= left:
+        return None
+    return (right - left) * 1000  # um → nm
+
+
+def _nearest_crossing(
+    rows: list[tuple[float, float]], threshold: float, indices: Any,
+) -> float | None:
+    for i in indices:
         w1, a1 = rows[i]
         w2, a2 = rows[i + 1]
-        if a1 <= half <= a2 or a2 <= half <= a1:
-            if a1 != a2:
-                w_half = w1 + (half - a1) * (w2 - w1) / (a2 - a1)
-                if left is None and w_half <= rows[len(rows)//2][0]:
-                    left = w_half
-                elif right is None:
-                    right = w_half
-            elif abs(a1 - half) < 1e-12:
-                if left is None:
-                    left = w1
-                else:
-                    right = w1
-
-    if left is not None and right is not None:
-        return abs(right - left) * 1000  # um → nm
+        low, high = sorted((a1, a2))
+        if not low <= threshold <= high:
+            continue
+        if a1 == a2:
+            return w1 if a1 == threshold else None
+        return w1 + (threshold - a1) * (w2 - w1) / (a2 - a1)
     return None
 
 
