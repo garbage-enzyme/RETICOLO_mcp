@@ -51,7 +51,7 @@ python -m reticolo_mcp.server
 | `reticolo_status` | 已验证（只读） | 引擎句柄与租约状态 |
 | `reticolo_start` / `reticolo_stop` | 需要重新实测 | v0.2 开发中生命周期已修改 |
 | `reticolo_solve_point` | 仅 TE 基准 | 单波长原始 R/T 与派生 A_balance |
-| `reticolo_sweep` | 实验性 | 带完整文件身份校验的可恢复扫描 |
+| `reticolo_sweep` | 实验性、默认禁用 | 旧同步扫描；优先使用持久化 job |
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实重启验收尚未执行 |
 | `reticolo_convergence` | 实验性 | 尚不能作为支路收敛证据 |
 | `reticolo_field_export` | 当前 V10 路径不可用 | 当前 retchamp 基准会失败 |
@@ -59,7 +59,7 @@ python -m reticolo_mcp.server
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
 历史基准证据，不会自动把当前所有工具版本提升为“已验证”。
 
-同步收敛和场导出默认禁用。仅开发用途可设置
+同步扫描、收敛和场导出默认禁用。仅开发用途可设置
 `RETICOLO_MCP_ENABLE_EXPERIMENTAL=1` 后重启 MCP host；该开关不会把工具提升为
 “已验证”。
 

@@ -224,6 +224,14 @@ class TestPublicJobControls:
 
 
 class TestExperimentalGates:
+    def test_synchronous_sweep_disabled_by_default(self):
+        result = server.reticolo_sweep(
+            wls_um=[5.0], D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            csv_path="D:\\outside-runtime.csv",
+        )
+        assert result["error_code"] == "experimental_tool_disabled"
+
     def test_convergence_disabled_by_default(self):
         result = server.reticolo_convergence(
             coarse_start=5.0, coarse_end=5.1, D=[1.0], nn=[5, 7],

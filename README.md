@@ -50,7 +50,7 @@ python -m reticolo_mcp.server
 | `reticolo_status` | Verified read-only | Engine handle + lease status |
 | `reticolo_start` / `reticolo_stop` | Reverification required | Lifecycle changed in v0.2 development |
 | `reticolo_solve_point` | TE fixture only | One wavelength to raw R/T and derived A_balance |
-| `reticolo_sweep` | Experimental | Resumable sweep with full-file identity validation |
+| `reticolo_sweep` | Experimental, disabled by default | Legacy synchronous sweep; prefer durable jobs |
 | `job_submit/status/tail/cancel/resume` | Experimental | Durable controls; real restart gate pending |
 | `reticolo_convergence` | Experimental | Not accepted as branch-aware convergence evidence |
 | `reticolo_field_export` | Unavailable on failing V10 path | Current retchamp fixture fails upstream |
@@ -59,9 +59,9 @@ Use `reticolo_capabilities` as the live maturity and deployment receipt. Histori
 real-engine results below remain fixture evidence; they do not promote every current
 tool revision to verified status.
 
-Synchronous convergence and field export are disabled by default. Development-only
+Synchronous sweep, convergence, and field export are disabled by default. Development-only
 access requires `RETICOLO_MCP_ENABLE_EXPERIMENTAL=1` followed by an MCP host restart;
-the flag does not promote either tool to verified status.
+the flag does not promote these tools to verified status.
 
 Field artifacts, when experimental access is enabled, may only be written under
 `RETICOLO_ARTIFACT_DIR` (default: `<runtime>/artifacts`).

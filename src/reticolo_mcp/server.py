@@ -239,6 +239,14 @@ def reticolo_sweep(
     Returns:
         {total, solved, skipped, errors, csv_path, runtime_s, status}
     """
+    if not EXPERIMENTAL_ENABLED:
+        return {
+            "status": "error", "error_code": "experimental_tool_disabled",
+            "detail": (
+                "synchronous sweep is disabled; use durable job_submit or set "
+                "RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host"
+            ),
+        }
     if engine.status()["status"] != "connected":
         return {"status": "error", "error_code": "engine_not_started"}
 
