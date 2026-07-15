@@ -61,3 +61,23 @@ class TestConfigHash:
             polarization=1,
         )
         assert h1 == h2
+
+    def test_sub_nanometer_precision_is_not_rounded_away(self):
+        base = dict(
+            schema_version="1", reticolo_version="V10", D=[1.0], nn=[5, 5],
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            polarization=1,
+        )
+        h1 = compute_config_hash(**base, wls_um=[5.0000000001])
+        h2 = compute_config_hash(**base, wls_um=[5.0000000002])
+        assert h1 != h2
+
+    def test_json_safe_lossy_inclusion_is_hashable(self):
+        value = compute_config_hash(
+            schema_version="1", reticolo_version="V10", wls_um=[5.0],
+            D=[1.0, 1.0], nn=[5, 5],
+            textures=[[[1.0, 0.0], [0, 0, 0.3, 0.3, [4.0, -0.01], 1]]],
+            profil={"heights": [0, 0.1, 0], "indices": [1, 1, 1]},
+            polarization=1,
+        )
+        assert len(value) == 64

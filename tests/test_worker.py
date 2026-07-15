@@ -23,7 +23,7 @@ class TestToComplex:
         assert len(result) == 1
         assert isinstance(result[0], list)
         assert result[0][0] == 1.0
-        assert result[0][1] == [0.0, 0.0, 0.3, 0.3, 4.0, 0.001, 1]
+        assert result[0][1] == [0.0, 0.0, 0.3, 0.3, complex(4.0, 0.001), 1]
 
     def test_mixed_complex_in_pattern(self):
         result = _to_complex([
@@ -34,7 +34,7 @@ class TestToComplex:
         assert result[0][0] == complex(1.0, 0.0)
         assert len(result[0][1]) == 6
         assert result[0][1][0:4] == [0.0, 0.0, 0.3, 0.3]
-        assert result[0][1][4] == [4.0, 0.001]
+        assert result[0][1][4] == complex(4.0, 0.001)
         assert result[0][1][5] == 1
 
     def test_empty_list(self):

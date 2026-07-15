@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import RUNTIME_DIR
+from .config_hash import normalize_textures
 from .durable_io import atomic_write_bytes
 
 SCHEMA_VERSION = "1"
@@ -109,11 +110,11 @@ def create_job_spec(
         "schema": SCHEMA_VERSION,
         "job_type": "staged_sweep",
         "created_at": time.time(),
-        "wls_um": [round(float(w), 9) for w in wls_um],
-        "D": [round(float(v), 9) for v in D],
+        "wls_um": [float(w) for w in wls_um],
+        "D": [float(v) for v in D],
         "nn": [int(v) for v in nn],
-        "textures": _normalize_textures(textures),
-        "profil_heights": [round(float(v), 9) for v in profil.get("heights", [])],
+        "textures": normalize_textures(textures),
+        "profil_heights": [float(v) for v in profil.get("heights", [])],
         "profil_indices": [int(v) for v in profil.get("indices", [])],
         "polarization": int(polarization),
         "config_hash": config_hash,
@@ -313,28 +314,6 @@ def worker_log_path(job_id: str) -> Path:
 # ------------------------------------------------------------------
 # helpers
 # ------------------------------------------------------------------
-
-def _normalize_textures(textures: list[Any]) -> list[Any]:
-    result = []
-    for tex in textures:
-        if isinstance(tex, (int, float, complex)):
-            c = complex(tex)
-            result.append([round(c.real, 9), round(c.imag, 9)])
-        elif isinstance(tex, (list, tuple)):
-            sub = []
-            for item in tex:
-                if isinstance(item, (int, float, complex)):
-                    c = complex(item)
-                    sub.append([round(c.real, 9), round(c.imag, 9)])
-                elif isinstance(item, (list, tuple)):
-                    sub.append([round(float(x), 9) for x in item])
-                else:
-                    sub.append(str(item))
-            result.append(sub)
-        else:
-            result.append(str(tex))
-    return result
-
 
 def _last_event(path: Path) -> dict[str, Any] | None:
     if not path.exists() or path.stat().st_size == 0:

@@ -39,25 +39,39 @@ MAX_WORKER_LOG_BYTES = 4 * 1024 * 1024
 
 def _to_complex(textures: list[Any]) -> list[Any]:
     """Convert JSON-safe [[re, im], ...] textures to Python complex numbers."""
-    result = []
+    result: list[Any] = []
     for tex in textures:
-        if isinstance(tex, list) and len(tex) == 2 and all(
-            isinstance(x, (int, float)) for x in tex):
-            result.append(complex(tex[0], tex[1]))
-        elif isinstance(tex, list):
-            sub = []
-            for item in tex:
-                if isinstance(item, list) and len(item) == 2 and all(
-                    isinstance(x, (int, float)) for x in item):
-                    sub.append(complex(item[0], item[1]))
-                elif isinstance(item, list):
-                    sub.append(item)
-                else:
-                    sub.append(item)
-            result.append(sub)
-        else:
+        if isinstance(tex, (int, float, complex)) and not isinstance(tex, bool):
             result.append(tex)
+            continue
+        if _is_pair(tex):
+            result.append(complex(tex[0], tex[1]))
+            continue
+        if not isinstance(tex, list) or not tex:
+            raise ValueError("invalid normalized texture")
+        background = complex(tex[0][0], tex[0][1]) if _is_pair(tex[0]) else tex[0]
+        patterned: list[Any] = [background]
+        for inclusion in tex[1:]:
+            if not isinstance(inclusion, list) or len(inclusion) not in (6, 7):
+                raise ValueError("invalid normalized inclusion")
+            if len(inclusion) == 7:
+                converted = [
+                    *inclusion[:4], complex(inclusion[4], inclusion[5]), inclusion[6],
+                ]
+            else:
+                converted = list(inclusion)
+            if _is_pair(converted[4]):
+                converted[4] = complex(converted[4][0], converted[4][1])
+            patterned.append(converted)
+        result.append(patterned)
     return result
+
+
+def _is_pair(value: Any) -> bool:
+    return (
+        isinstance(value, list) and len(value) == 2
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in value)
+    )
 
 
 def main(job_id: str | None = None) -> int:
