@@ -136,6 +136,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         append_event(job_id, {"event": "engine_start_failed",
                               "detail": start_r})
         _log(job_id, f"engine start failed: {start_r}")
+        _finalize_cleanup(job_id, attempt_id, eng)
         return 1
 
     try:
@@ -270,12 +271,58 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         return 1
 
     finally:
+        if not _finalize_cleanup(job_id, attempt_id, eng):
+            return 1
+
+
+def _finalize_cleanup(
+    job_id: str, attempt_id: str, eng: REticoloEngine,
+) -> bool:
+    """Record a terminal exit only after exact engine cleanup is proven."""
+    try:
+        cleanup = eng.stop()
+    except Exception as exc:
+        cleanup = {
+            "status": "cleanup_uncertain",
+            "error_code": "engine_stop_raised",
+            "detail": f"{type(exc).__name__}: {exc}"[:500],
+        }
+    if cleanup.get("status") != "stopped":
+        evidence = {
+            key: cleanup[key]
+            for key in ("status", "error_code", "detail", "connected")
+            if key in cleanup
+        }
+        current = read_state(job_id) or {}
+        current_status = current.get("status")
+        updated = transition_state(
+            job_id,
+            allowed_from={current_status} if current_status else set(),
+            attempt_id=attempt_id,
+            updates={
+                "status": "cleanup_uncertain",
+                "cleanup": evidence,
+                "cleanup_checked_at": time.time(),
+            },
+        )
         try:
-            eng.stop()
+            append_event(job_id, {
+                "event": "worker_cleanup_uncertain",
+                "attempt_id": attempt_id,
+                "cleanup": evidence,
+                "state_updated": bool(updated.get("updated")),
+            })
         except Exception:
             pass
-        append_event(job_id, {"event": "worker_exited"})
-        _log(job_id, "worker exited")
+        _log(job_id, f"cleanup uncertain: {evidence}")
+        return False
+    append_event(job_id, {
+        "event": "worker_exited",
+        "attempt_id": attempt_id,
+        "cleanup_proven": True,
+    })
+    _log(job_id, "worker exited after proven cleanup")
+    return True
 
 
 def _cancel_requested(job_id: str, attempt_id: str = "") -> bool:

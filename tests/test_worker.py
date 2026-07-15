@@ -5,7 +5,8 @@ from __future__ import annotations
 from io import BytesIO
 
 from reticolo_mcp.worker import (
-    _BoundedLogWriter, _admit_point, _cancel_requested, _to_complex,
+    _BoundedLogWriter, _admit_point, _cancel_requested, _finalize_cleanup,
+    _to_complex,
 )
 
 
@@ -143,3 +144,69 @@ def test_point_admission_persists_evidence(monkeypatch):
     decision = _admit_point("job-abc", "attempt-1", {"resource_policy": policy}, 5.0, 0.0)
     assert decision["decision"] == "green"
     assert events[0]["event"] == "pre_point_resource_admission"
+
+
+class TestFinalCleanup:
+    def test_proven_cleanup_records_bound_exit(self, monkeypatch):
+        engine = type("Engine", (), {"stop": lambda self: {"status": "stopped"}})()
+        events = []
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.append_event",
+            lambda _job_id, event: events.append(event),
+        )
+        monkeypatch.setattr("reticolo_mcp.worker._log", lambda *_args: None)
+        assert _finalize_cleanup("job-abc", "attempt-1", engine) is True
+        assert events == [{
+            "event": "worker_exited",
+            "attempt_id": "attempt-1",
+            "cleanup_proven": True,
+        }]
+
+    def test_uncertain_cleanup_overrides_completed_state(self, monkeypatch):
+        engine = type("Engine", (), {"stop": lambda self: {
+            "status": "cleanup_uncertain",
+            "error_code": "matlab_quit_failed",
+            "detail": "quit failed",
+            "connected": True,
+        }})()
+        transitions = []
+        events = []
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {"status": "completed", "attempt_id": "attempt-1"},
+        )
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.transition_state",
+            lambda *args, **kwargs: transitions.append((args, kwargs))
+            or {"updated": True},
+        )
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.append_event",
+            lambda _job_id, event: events.append(event),
+        )
+        monkeypatch.setattr("reticolo_mcp.worker._log", lambda *_args: None)
+        assert _finalize_cleanup("job-abc", "attempt-1", engine) is False
+        assert transitions[0][1]["allowed_from"] == {"completed"}
+        assert transitions[0][1]["updates"]["status"] == "cleanup_uncertain"
+        assert events[0]["event"] == "worker_cleanup_uncertain"
+
+    def test_stop_exception_is_bounded_cleanup_uncertainty(self, monkeypatch):
+        def fail_stop():
+            raise RuntimeError("x" * 1000)
+
+        engine = type("Engine", (), {"stop": lambda self: fail_stop()})()
+        updates = []
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {"status": "failed", "attempt_id": "attempt-1"},
+        )
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.transition_state",
+            lambda *args, **kwargs: updates.append(kwargs["updates"])
+            or {"updated": True},
+        )
+        monkeypatch.setattr("reticolo_mcp.worker.append_event", lambda *_args: None)
+        monkeypatch.setattr("reticolo_mcp.worker._log", lambda *_args: None)
+        assert _finalize_cleanup("job-abc", "attempt-1", engine) is False
+        assert updates[0]["cleanup"]["error_code"] == "engine_stop_raised"
+        assert len(updates[0]["cleanup"]["detail"]) == 500
