@@ -135,6 +135,7 @@ class TestEngineLifecycle:
             ),
             patch("reticolo_mcp.engine._lease_status", return_value={"collision": False}),
             patch("reticolo_mcp.engine._check_matlab_engine", return_value=""),
+            patch("reticolo_mcp.engine._matlab_process_inventory", return_value={}),
             patch(
                 "reticolo_mcp.engine.lease_acquire",
                 return_value={"acquired": True, "token": "owned-token"},
@@ -175,6 +176,10 @@ class TestEngineLifecycle:
             patch("reticolo_mcp.engine._lease_status", return_value=lease_status),
             patch("reticolo_mcp.engine._check_matlab_engine", return_value=""),
             patch(
+                "reticolo_mcp.engine._matlab_process_inventory",
+                side_effect=[{}, {4321: 123.0}],
+            ),
+            patch(
                 "reticolo_mcp.engine.lease_acquire",
                 return_value={"acquired": True, "token": "owned-token"},
             ),
@@ -185,6 +190,93 @@ class TestEngineLifecycle:
         assert os.environ["TMP"] == "D:\\original_tmp"
         assert os.environ["TEMP"] == "D:\\original_temp"
         assert "TMPDIR" not in os.environ
+
+    def test_start_rejects_existing_matlab_process(self, tmp_path):
+        from reticolo_mcp.engine import REticoloEngine
+        eng = REticoloEngine(tmp_path)
+        with (
+            patch("reticolo_mcp.engine._lease_status", return_value={"collision": False}),
+            patch("reticolo_mcp.engine._check_matlab_engine", return_value=""),
+            patch(
+                "reticolo_mcp.engine._matlab_process_inventory",
+                return_value={4321: 123.0},
+            ),
+            patch("reticolo_mcp.engine.lease_acquire") as acquire,
+        ):
+            result = eng.start()
+        assert result["error_code"] == "matlab_process_collision"
+        assert result["matlab_pids"] == [4321]
+        acquire.assert_not_called()
+
+    def test_start_exception_without_handle_retains_lease_if_process_appears(
+        self, tmp_path,
+    ):
+        import types
+        from reticolo_mcp.engine import REticoloEngine
+
+        matlab_module = types.ModuleType("matlab")
+        matlab_module.__path__ = []
+        matlab_engine_module = types.ModuleType("matlab.engine")
+        matlab_engine_module.start_matlab = MagicMock(
+            side_effect=RuntimeError("engine handshake failed"),
+        )
+        matlab_module.engine = matlab_engine_module
+        eng = REticoloEngine(tmp_path)
+        eng._matlab_temp = str(tmp_path / "temp")
+        eng._scratch_dir = str(tmp_path / "scratch")
+        with (
+            patch.dict(
+                sys.modules,
+                {"matlab": matlab_module, "matlab.engine": matlab_engine_module},
+            ),
+            patch("reticolo_mcp.engine._lease_status", return_value={"collision": False}),
+            patch("reticolo_mcp.engine._check_matlab_engine", return_value=""),
+            patch(
+                "reticolo_mcp.engine._matlab_process_inventory",
+                side_effect=[{}, {4321: 123.0}],
+            ),
+            patch(
+                "reticolo_mcp.engine.lease_acquire",
+                return_value={"acquired": True, "token": "owned-token"},
+            ),
+            patch("reticolo_mcp.engine.lease_release") as release,
+            patch.object(eng, "_start_heartbeat"),
+        ):
+            result = eng.start()
+        assert result["error_code"] == "startup_matlab_process_cleanup_unproven"
+        assert result["matlab_pids"] == [4321]
+        assert eng._lease_token == "owned-token"
+        release.assert_not_called()
+
+    def test_stop_requires_process_exit_evidence(self):
+        from reticolo_mcp.engine import REticoloEngine
+        eng = REticoloEngine(Path("/"))
+        owned = MagicMock()
+        eng._engine = owned
+        eng._lease_token = "owned-token"
+        eng._matlab_processes = {4321: 123.0}
+        with (
+            patch.object(eng, "_wait_for_matlab_absent", return_value=False),
+            patch("reticolo_mcp.engine.lease_release") as release,
+        ):
+            result = eng.stop()
+        assert result["status"] == "cleanup_uncertain"
+        assert result["error_code"] == "matlab_process_cleanup_unproven"
+        assert eng._engine is owned
+        assert eng._lease_token == "owned-token"
+        release.assert_not_called()
+
+    def test_process_inventory_parses_pid_and_creation_date(self):
+        from reticolo_mcp.engine import _matlab_process_inventory
+        completed = MagicMock(
+            returncode=0,
+            stdout=b'"MATLAB.exe","4321","Console","1","100,000 K"\r\n',
+        )
+        with (
+            patch("reticolo_mcp.engine.subprocess.run", return_value=completed),
+            patch("reticolo_mcp.engine._process_creation_date", return_value=123.5),
+        ):
+            assert _matlab_process_inventory() == {4321: 123.5}
 
     def test_solve_without_engine(self):
         from reticolo_mcp.engine import REticoloEngine

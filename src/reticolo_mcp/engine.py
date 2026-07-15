@@ -28,7 +28,10 @@ RETICOLO conventions enforced here:
 
 from __future__ import annotations
 
+import csv
+import locale
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -46,7 +49,10 @@ from .lease import (
     lease_heartbeat,
     lease_release,
     lease_status as _lease_status,
+    _process_creation_date,
 )
+
+PROCESS_EXIT_WAIT_S = 5.0
 
 
 def _ensure_matlab() -> Any:
@@ -74,6 +80,7 @@ class REticoloEngine:
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
         self._mode: str = "memory"
+        self._matlab_processes: dict[int, float] = {}
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -110,6 +117,19 @@ class REticoloEngine:
             return {"status": "error", "error_code": "reticolo_dir_missing",
                     "detail": str(self._reticolo_dir)}
 
+        inventory_before = _matlab_process_inventory()
+        if inventory_before is None:
+            return {
+                "status": "error",
+                "error_code": "matlab_process_inventory_unavailable",
+            }
+        if inventory_before:
+            return {
+                "status": "error",
+                "error_code": "matlab_process_collision",
+                "matlab_pids": sorted(inventory_before),
+            }
+
         acquired = lease_acquire(label, mode=mode)
         if not acquired["acquired"]:
             return {"status": "error", "error_code": "lease_acquire_failed",
@@ -132,6 +152,15 @@ class REticoloEngine:
             import matlab.engine
             self._engine = matlab.engine.start_matlab()
             self._started_at = time.time()
+            inventory_after = _matlab_process_inventory()
+            if inventory_after is None:
+                raise RuntimeError("MATLAB process inventory unavailable after start")
+            if len(inventory_after) != 1:
+                raise RuntimeError(
+                    "expected exactly one owned MATLAB process after start, "
+                    f"found {len(inventory_after)}"
+                )
+            self._matlab_processes = inventory_after
 
             self._engine.addpath(str(self._reticolo_dir), nargout=0)
             self._engine.eval(
@@ -164,8 +193,28 @@ class REticoloEngine:
                         "detail": _classify_error(exc),
                         "cleanup_error": _classify_error(cleanup_exc),
                     }
+                if not self._wait_for_matlab_absent():
+                    return {
+                        "status": "cleanup_uncertain",
+                        "connected": False,
+                        "error_code": "startup_matlab_process_cleanup_unproven",
+                        "detail": _classify_error(exc),
+                        "matlab_pids": sorted(self._matlab_processes),
+                    }
+            else:
+                inventory_after_failure = _matlab_process_inventory()
+                if inventory_after_failure is None or inventory_after_failure:
+                    self._matlab_processes = inventory_after_failure or {}
+                    return {
+                        "status": "cleanup_uncertain",
+                        "connected": False,
+                        "error_code": "startup_matlab_process_cleanup_unproven",
+                        "detail": _classify_error(exc),
+                        "matlab_pids": sorted(self._matlab_processes),
+                    }
             self._engine = None
             self._started_at = None
+            self._matlab_processes = {}
             release = self._release_owned_lease()
             if not release["released"]:
                 return {
@@ -191,6 +240,14 @@ class REticoloEngine:
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""
         if self._engine is None:
+            if self._matlab_processes and not self._wait_for_matlab_absent():
+                return {
+                    "status": "cleanup_uncertain",
+                    "connected": False,
+                    "error_code": "matlab_process_cleanup_unproven",
+                    "matlab_pids": sorted(self._matlab_processes),
+                }
+            self._matlab_processes = {}
             release = self._release_owned_lease()
             if not release["released"]:
                 return {
@@ -219,8 +276,18 @@ class REticoloEngine:
                 "cleanup_warnings": cleanup_warnings,
             }
 
+        if not self._wait_for_matlab_absent():
+            return {
+                "status": "cleanup_uncertain",
+                "connected": False,
+                "error_code": "matlab_process_cleanup_unproven",
+                "matlab_pids": sorted(self._matlab_processes),
+                "cleanup_warnings": cleanup_warnings,
+            }
+
         self._engine = None
         self._started_at = None
+        self._matlab_processes = {}
         release = self._release_owned_lease()
         if not release["released"]:
             return {
@@ -252,6 +319,21 @@ class REticoloEngine:
         self._start_heartbeat()
         return release
 
+    def _wait_for_matlab_absent(self) -> bool:
+        """Boundedly prove that no MATLAB process remains after owned quit."""
+        if not self._matlab_processes:
+            return True
+        deadline = time.monotonic() + PROCESS_EXIT_WAIT_S
+        while True:
+            inventory = _matlab_process_inventory()
+            if inventory is None:
+                return False
+            if not inventory:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
+
     def status(self) -> dict[str, Any]:
         """Return current state without side effects."""
         ls = _lease_status()
@@ -268,6 +350,10 @@ class REticoloEngine:
             "reticolo_path": str(self._reticolo_dir),
             "scratch_dir": self._scratch_dir,
             "mode": self._mode,
+            "matlab_processes": [
+                {"pid": pid, "creation_date": creation_date}
+                for pid, creation_date in sorted(self._matlab_processes.items())
+            ],
             "lease_heartbeat_healthy": self._lease_healthy,
             "lease": ls,
         }
@@ -466,6 +552,38 @@ def _check_matlab_engine() -> str:
                 "From the repo root, run: "
                 "pip install \"D:\\Program Files\\MATLAB\\R2025b\\"
                 "extern\\engines\\python\"")
+
+
+def _matlab_process_inventory() -> dict[int, float] | None:
+    """Return exact MATLAB PID/creation evidence, or None if incomplete."""
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq MATLAB.exe", "/FO", "CSV", "/NH"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    encoding = locale.getpreferredencoding(False) or "utf-8"
+    output = completed.stdout.decode(encoding, errors="replace")
+    inventory: dict[int, float] = {}
+    for row in csv.reader(output.splitlines()):
+        if len(row) < 2 or row[0].strip().lower() != "matlab.exe":
+            continue
+        try:
+            pid = int(row[1].replace(",", "").strip())
+        except ValueError:
+            return None
+        creation_date = _process_creation_date(pid)
+        if creation_date is None:
+            return None
+        inventory[pid] = creation_date
+    return inventory
 
 
 def _classify_error(exc: Exception) -> str:
