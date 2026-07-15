@@ -118,9 +118,13 @@ class REticoloEngine:
         self._lease_healthy = True
         self._start_heartbeat()
 
-        # P0-7: create dirs and set env before engine start
+        # P0-7: create dirs and set env before engine start. Restore the MCP
+        # host environment after MATLAB has inherited and confirmed its copy.
         Path(self._matlab_temp).mkdir(parents=True, exist_ok=True)
         Path(self._scratch_dir).mkdir(parents=True, exist_ok=True)
+        previous_temp_env = {
+            var: os.environ.get(var) for var in ("TMP", "TEMP", "TMPDIR")
+        }
         for var in ("TMP", "TEMP", "TMPDIR"):
             os.environ[var] = self._matlab_temp
 
@@ -177,6 +181,12 @@ class REticoloEngine:
                 "error_code": "engine_start_failed",
                 "detail": _classify_error(exc),
             }
+        finally:
+            for var, previous in previous_temp_env.items():
+                if previous is None:
+                    os.environ.pop(var, None)
+                else:
+                    os.environ[var] = previous
 
     def stop(self) -> dict[str, Any]:
         """Stop the MATLAB engine and clean up scratch files."""

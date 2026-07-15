@@ -149,6 +149,43 @@ class TestEngineLifecycle:
         assert eng._lease_token == "owned-token"
         release.assert_not_called()
 
+    def test_start_restores_host_temp_environment(self, tmp_path, monkeypatch):
+        import types
+        from reticolo_mcp.engine import REticoloEngine
+
+        monkeypatch.setenv("TMP", "D:\\original_tmp")
+        monkeypatch.setenv("TEMP", "D:\\original_temp")
+        monkeypatch.delenv("TMPDIR", raising=False)
+        owned = MagicMock()
+        matlab_module = types.ModuleType("matlab")
+        matlab_module.__path__ = []
+        matlab_engine_module = types.ModuleType("matlab.engine")
+        matlab_engine_module.start_matlab = MagicMock(return_value=owned)
+        matlab_module.engine = matlab_engine_module
+
+        eng = REticoloEngine(tmp_path)
+        eng._matlab_temp = str(tmp_path / "matlab-temp")
+        eng._scratch_dir = str(tmp_path / "scratch")
+        lease_status = {"collision": False, "blockers": []}
+        with (
+            patch.dict(
+                sys.modules,
+                {"matlab": matlab_module, "matlab.engine": matlab_engine_module},
+            ),
+            patch("reticolo_mcp.engine._lease_status", return_value=lease_status),
+            patch("reticolo_mcp.engine._check_matlab_engine", return_value=""),
+            patch(
+                "reticolo_mcp.engine.lease_acquire",
+                return_value={"acquired": True, "token": "owned-token"},
+            ),
+            patch.object(eng, "_start_heartbeat"),
+        ):
+            result = eng.start()
+        assert result["status"] == "connected"
+        assert os.environ["TMP"] == "D:\\original_tmp"
+        assert os.environ["TEMP"] == "D:\\original_temp"
+        assert "TMPDIR" not in os.environ
+
     def test_solve_without_engine(self):
         from reticolo_mcp.engine import REticoloEngine
         eng = REticoloEngine(Path("/nonexistent"))
