@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import time
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -81,7 +83,44 @@ class TestLeaseLifecycle:
         self.lease_path.write_text(data)
         s = lease_status()
         assert s["reticolo_lease"]["active"] is False
+        assert s["reticolo_lease"]["state"] == "stale_dead"
+        assert s["ready"] is True
         lease_release()
+
+    def test_malformed_lease_fails_closed(self):
+        self.lease_path.write_text("{broken", encoding="utf-8")
+        status = lease_status()
+        assert status["ready"] is False
+        assert status["collision"] is True
+        assert status["reticolo_lease"]["state"] == "malformed"
+        result = lease_acquire("must-not-overwrite")
+        assert result["acquired"] is False
+        assert self.lease_path.read_text(encoding="utf-8") == "{broken"
+
+    def test_stale_heartbeat_with_live_pid_fails_closed(self):
+        acquired = lease_acquire("test")
+        data = json.loads(self.lease_path.read_text(encoding="utf-8"))
+        data["heartbeat"] = time.time() - 1000
+        self.lease_path.write_text(json.dumps(data), encoding="utf-8")
+        status = lease_status()
+        assert status["ready"] is False
+        assert status["reticolo_lease"]["state"] == "stale_live"
+        assert lease_acquire("contender")["acquired"] is False
+        data["heartbeat"] = time.time()
+        self.lease_path.write_text(json.dumps(data), encoding="utf-8")
+        assert lease_release(acquired["token"])["released"] is True
+
+    def test_live_owner_without_creation_date_is_malformed(self):
+        acquired = lease_acquire("test")
+        data = json.loads(self.lease_path.read_text(encoding="utf-8"))
+        data.pop("creation_date")
+        self.lease_path.write_text(json.dumps(data), encoding="utf-8")
+        status = lease_status()
+        assert status["ready"] is False
+        assert status["reticolo_lease"]["state"] == "malformed"
+        data["creation_date"] = _process_creation_date(os.getpid())
+        self.lease_path.write_text(json.dumps(data), encoding="utf-8")
+        assert lease_release(acquired["token"])["released"] is True
 
     def test_heartbeat_updates(self):
         r = lease_acquire("test")

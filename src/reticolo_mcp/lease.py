@@ -38,6 +38,8 @@ HEARTBEAT_INTERVAL_S = 30
 STALE_HEARTBEAT_S = 90
 _MUTEX_NAME = r"Global\reticolo_mcp_lease"
 
+BLOCKING_LEASE_STATES = frozenset({"active", "malformed", "uncertain", "stale_live"})
+
 
 def _process_creation_date(pid: int) -> float | None:
     """Return process creation time as epoch seconds, or None if dead."""
@@ -78,30 +80,58 @@ def _is_pid_alive(pid: int) -> bool:
     return True
 
 
-def _read_lease(path: Path) -> dict[str, Any] | None:
-    """Read a lease file. Returns None if missing, malformed, or stale."""
+def _inspect_lease(path: Path) -> dict[str, Any]:
+    """Classify lease evidence without collapsing uncertainty into absence."""
     if not path.is_file():
-        return None
+        return {"state": "absent", "data": None, "detail": "file absent"}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    except json.JSONDecodeError:
+        return {"state": "malformed", "data": None, "detail": "invalid JSON"}
+    except OSError as exc:
+        return {
+            "state": "uncertain", "data": None,
+            "detail": f"lease read failed: {type(exc).__name__}",
+        }
     if not isinstance(data, dict):
-        return None
+        return {"state": "malformed", "data": None, "detail": "lease is not an object"}
     pid = data.get("pid", 0)
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return {"state": "malformed", "data": data, "detail": "invalid pid"}
     recorded_date = data.get("creation_date", 0)
     if recorded_date:
         actual_date = _process_creation_date(pid)
         if actual_date is None:
-            return None
+            if _is_pid_alive(pid):
+                return {
+                    "state": "uncertain", "data": data,
+                    "detail": "live pid creation time unavailable",
+                }
+            return {"state": "stale_dead", "data": data, "detail": "owner pid absent"}
         if abs(actual_date - recorded_date) > 1.0:
-            return None
+            return {"state": "stale_reused", "data": data, "detail": "pid reused"}
     elif not _is_pid_alive(pid):
-        return None
+        return {"state": "stale_dead", "data": data, "detail": "owner pid absent"}
+    else:
+        return {
+            "state": "malformed", "data": data,
+            "detail": "live owner lacks creation_date",
+        }
     hb = data.get("heartbeat", 0)
-    if hb and time.time() - hb > STALE_HEARTBEAT_S:
-        return None
-    return data
+    if not isinstance(hb, (int, float)) or isinstance(hb, bool) or hb <= 0:
+        return {"state": "malformed", "data": data, "detail": "invalid heartbeat"}
+    if time.time() - hb > STALE_HEARTBEAT_S:
+        return {
+            "state": "stale_live", "data": data,
+            "detail": "heartbeat expired but exact owner pid is live",
+        }
+    return {"state": "active", "data": data, "detail": "active owner"}
+
+
+def _read_lease(path: Path) -> dict[str, Any] | None:
+    """Compatibility helper returning only a fully active lease."""
+    inspection = _inspect_lease(path)
+    return inspection["data"] if inspection["state"] == "active" else None
 
 
 def _comsol_lease_path() -> Path | None:
@@ -115,34 +145,55 @@ def _comsol_lease_path() -> Path | None:
 
 def lease_status() -> dict[str, Any]:
     """Report current lease state. Read-only, no side effects."""
-    our = _read_lease(LEASE_PATH)
+    our_inspection = _inspect_lease(LEASE_PATH)
+    our = our_inspection.get("data") or {}
     our_pid = os.getpid()
 
     comsol_path = _comsol_lease_path()
-    comsol = _read_lease(comsol_path) if comsol_path else None
+    comsol_inspection = (
+        _inspect_lease(comsol_path) if comsol_path
+        else {"state": "absent", "data": None, "detail": "file absent"}
+    )
+    comsol = comsol_inspection.get("data") or {}
 
     collision = False
     blockers = []
-    if comsol:
+    if comsol_inspection["state"] in BLOCKING_LEASE_STATES:
         collision = True
         blockers.append({
             "owner": comsol.get("owner", "unknown"),
             "lease": str(comsol_path),
             "pid": comsol.get("pid"),
+            "state": comsol_inspection["state"],
+            "detail": comsol_inspection["detail"],
         })
-    if our and our.get("pid") != our_pid:
+    our_is_active_owner = (
+        our_inspection["state"] == "active" and our.get("pid") == our_pid
+    )
+    if (
+        our_inspection["state"] in BLOCKING_LEASE_STATES
+        and not our_is_active_owner
+    ):
         collision = True
         blockers.append({
             "owner": our.get("owner", "reticolo-mcp"),
             "lease": str(LEASE_PATH),
             "pid": our.get("pid"),
+            "state": our_inspection["state"],
+            "detail": our_inspection["detail"],
         })
 
     return {
-        "reticolo_lease": {"active": our is not None and our.get("pid") == our_pid,
-                           "path": str(LEASE_PATH)},
-        "comsol_lease": {"active": comsol is not None,
-                         "path": str(comsol_path) if comsol_path else None},
+        "reticolo_lease": {
+            "active": our_is_active_owner, "state": our_inspection["state"],
+            "detail": our_inspection["detail"], "path": str(LEASE_PATH),
+        },
+        "comsol_lease": {
+            "active": comsol_inspection["state"] == "active",
+            "state": comsol_inspection["state"],
+            "detail": comsol_inspection["detail"],
+            "path": str(comsol_path) if comsol_path else None,
+        },
         "collision": collision,
         "blockers": blockers,
         "ready": not collision,
