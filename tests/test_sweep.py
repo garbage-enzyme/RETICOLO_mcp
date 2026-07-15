@@ -8,7 +8,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from reticolo_mcp.sweep import _read_completed, _read_first_config_hash, analyze_sweep, run_sweep
+from reticolo_mcp.sweep import (
+    _read_completed,
+    _read_first_config_hash,
+    analyze_sweep,
+    run_sweep,
+)
 
 HEADER = "wl_um,nn_x,nn_y,R,T,A_balance,passive,solve_time_s,status,error,config_hash,config_id,polarization,timestamp"
 
@@ -56,6 +61,51 @@ class TestReadCompleted:
 
 
 class TestRunSweep:
+    def test_rejects_mixed_hash_after_first_row(self, tmp_path):
+        engine = MagicMock()
+        csv_path = tmp_path / "mixed.csv"
+        csv_path.write_text(
+            HEADER + "\n"
+            "5.0,5,5,0.1,0.8,0.1,True,1,ok,,good,label,1,now\n"
+            "5.1,5,5,0.1,0.8,0.1,True,1,ok,,other,label,1,now\n",
+            encoding="utf-8",
+        )
+        result = run_sweep(
+            engine, wls_um=[5.0, 5.1], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_hash="good", csv_path=csv_path,
+        )
+        assert result["status"] == "error"
+        assert "row 3" in result["error"]
+        engine.solve_point.assert_not_called()
+
+    def test_rejects_missing_hash_and_bad_header(self, tmp_path):
+        engine = MagicMock()
+        csv_path = tmp_path / "bad.csv"
+        csv_path.write_text("wl_um,status\n5.0,ok\n", encoding="utf-8")
+        result = run_sweep(
+            engine, wls_um=[5.0], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_hash="good", csv_path=csv_path,
+        )
+        assert result["status"] == "error"
+        assert "header" in result["error"]
+
+    def test_wavelength_round_trips_beyond_six_decimals(self, tmp_path):
+        engine = MagicMock()
+        wl = 5.123456789012345
+        engine.solve_point.return_value = _ok_result(wl)
+        csv_path = tmp_path / "precision.csv"
+        result = run_sweep(
+            engine, wls_um=[wl], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_hash="precise", csv_path=csv_path,
+        )
+        assert result["status"] == "completed"
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            row = next(csv.DictReader(f))
+        assert float(row["wl_um"]) == wl
+
     def test_cancel_before_first_point(self, tmp_path):
         engine = MagicMock()
         csv_path = tmp_path / "sweep.csv"

@@ -212,6 +212,17 @@ def reticolo_sweep(
     if err:
         return err
 
+    config_hash = compute_config_hash(
+        schema_version="1",
+        reticolo_version="V10",
+        wls_um=[float(w) for w in wls_um],
+        D=[float(v) for v in D],
+        nn=[int(nn[0]), int(nn[1])],
+        textures=textures,
+        profil=profil,
+        polarization=int(polarization),
+    )
+
     return run_sweep(
         engine=engine,
         wls_um=[float(w) for w in wls_um],
@@ -221,6 +232,7 @@ def reticolo_sweep(
         profil=profil,
         polarization=int(polarization),
         config_id=config_id,
+        config_hash=config_hash,
         csv_path=csv_path,
         resume=resume,
     )

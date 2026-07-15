@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+CSV_FIELDS = [
+    "wl_um", "nn_x", "nn_y", "R", "T", "A_balance",
+    "passive", "solve_time_s", "status", "error",
+    "config_hash", "config_id", "polarization", "timestamp",
+]
+
+
 def run_sweep(
     engine: Any,
     *,
@@ -55,6 +62,17 @@ def run_sweep(
 
     D_list = [float(D)] if isinstance(D, (int, float)) else [float(v) for v in D]
 
+    file_exists = csv_path.exists()
+    if file_exists and config_hash:
+        validation_error = _validate_existing_csv(csv_path, config_hash)
+        if validation_error:
+            return {
+                "total": len(wls_um), "solved": 0, "skipped": 0,
+                "errors": 0, "csv_path": str(csv_path),
+                "runtime_s": 0, "config_hash": config_hash,
+                "status": "error", "error": validation_error,
+            }
+
     resume_key = config_hash or config_id or ""
     skipped: set[float] = set()
     if resume and csv_path.exists():
@@ -74,19 +92,6 @@ def run_sweep(
             "cancel_observed": True,
         }
 
-    file_exists = csv_path.exists()
-
-    if file_exists and config_hash:
-        existing_hash = _read_first_config_hash(csv_path)
-        if existing_hash and existing_hash != config_hash:
-            return {
-                "total": len(wls_um), "solved": 0, "skipped": 0,
-                "errors": 0, "csv_path": str(csv_path),
-                "runtime_s": 0, "config_hash": config_hash,
-                "status": "error",
-                "error": f"config_hash mismatch: existing={existing_hash} requested={config_hash}",
-            }
-
     t0 = time.time()
     solved = 0
     errors = 0
@@ -94,11 +99,7 @@ def run_sweep(
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow([
-                "wl_um", "nn_x", "nn_y", "R", "T", "A_balance",
-                "passive", "solve_time_s", "status", "error",
-                "config_hash", "config_id", "polarization", "timestamp",
-            ])
+            writer.writerow(CSV_FIELDS)
 
         for wl in pending:
             if _cancel_requested(should_cancel):
@@ -111,7 +112,7 @@ def run_sweep(
             )
 
             writer.writerow([
-                f"{wl:.6f}",
+                format(float(wl), ".17g"),
                 result.get("nn", [nn[0], nn[1]])[0],
                 result.get("nn", [nn[0], nn[1]])[1],
                 f"{result.get('R', 0):.12f}" if result["status"] == "ok" else "",
@@ -248,6 +249,27 @@ def _read_first_config_hash(csv_path: Path) -> str | None:
                 return row.get(hash_col) or None
     except (OSError, csv.Error):
         return None
+    return None
+
+
+def _validate_existing_csv(csv_path: Path, config_hash: str) -> str | None:
+    """Validate the complete existing result file before any append/resume."""
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames != CSV_FIELDS:
+                return "invalid or incompatible CSV header"
+            for line_number, row in enumerate(reader, start=2):
+                row_hash = row.get("config_hash", "")
+                if not row_hash:
+                    return f"missing config_hash at row {line_number}"
+                if row_hash != config_hash:
+                    return (
+                        f"config_hash mismatch at row {line_number}: "
+                        f"existing={row_hash} requested={config_hash}"
+                    )
+    except (OSError, csv.Error) as exc:
+        return f"cannot validate existing CSV: {type(exc).__name__}"
     return None
 
 
