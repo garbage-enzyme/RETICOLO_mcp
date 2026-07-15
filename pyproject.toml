@@ -7,7 +7,8 @@ name = "reticolo-mcp"
 version = "0.2.0.dev1"
 description = "MCP server for RETICOLO V10 RCWA solver via MATLAB Engine API"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.28",
@@ -23,6 +24,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 exclude = ["reticolo_mcp.tests*"]
+
+[tool.setuptools]
+include-package-data = false
 
 # reticolo_v10/ is NOT included in the wheel.
 # It is CC-BY 4.0 licensed (different from the MIT wrapper).
