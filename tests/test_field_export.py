@@ -62,6 +62,9 @@ class TestFieldRequestValidation:
     def test_invalid_axis(self):
         assert self._valid(slice_axis="time")["error_code"] == "invalid_slice_axis"
 
+    def test_tm_is_explicitly_unsupported(self):
+        assert self._valid(polarization=-1)["error_code"] == "unsupported_polarization"
+
     @pytest.mark.parametrize("max_points", [0, -1, 500_001, True])
     def test_invalid_max_points(self, max_points):
         assert self._valid(max_points=max_points)["error_code"] == "invalid_max_points"

@@ -65,9 +65,12 @@ def _validate_solve_inputs(
     if len(textures) > MAX_TEXTURES:
         return {"status": "error", "error_code": "too_many_textures",
                 "detail": f"max {MAX_TEXTURES} textures, got {len(textures)}"}
-    if polarization not in (-1, 1):
+    if polarization == -1:
+        return {"status": "error", "error_code": "unsupported_polarization",
+                "detail": "TM result-channel mapping is not release accepted"}
+    if polarization != 1:
         return {"status": "error", "error_code": "invalid_polarization",
-                "detail": "polarization must be 1 (TE) or -1 (TM)"}
+                "detail": "verified public polarization is currently 1 (TE)"}
     if len(config_id) > MAX_CONFIG_ID_LEN:
         return {"status": "error", "error_code": "config_id_too_long",
                 "detail": f"config_id max {MAX_CONFIG_ID_LEN} chars"}
@@ -450,6 +453,12 @@ def reticolo_convergence(
 
     Requires engine to be connected (call reticolo_start first).
     """
+    err = _validate_solve_inputs(
+        wl_um=coarse_start, D=D, nn=nn, textures=textures,
+        profil=profil, polarization=polarization, config_id=config_label,
+    )
+    if err:
+        return err
     if engine.status()["status"] != "connected":
         return {"status": "error", "error_code": "engine_not_started"}
 

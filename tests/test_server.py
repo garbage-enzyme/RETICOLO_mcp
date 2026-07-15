@@ -89,6 +89,11 @@ class TestValidateSolveInputs:
         assert err is not None
         assert err["error_code"] == "invalid_polarization"
 
+    def test_tm_is_explicitly_unsupported(self):
+        err = self._valid(polarization=-1)
+        assert err is not None
+        assert err["error_code"] == "unsupported_polarization"
+
     def test_config_id_too_long(self):
         from reticolo_mcp.config import MAX_CONFIG_ID_LEN
         err = self._valid(config_id="x" * (MAX_CONFIG_ID_LEN + 1))

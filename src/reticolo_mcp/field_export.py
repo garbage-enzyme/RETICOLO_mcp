@@ -56,7 +56,7 @@ def export_field(
     validation_error = _validate_field_request(
         wl_um=wl_um, D=D, nn=nn, component=component,
         slice_axis=slice_axis, slice_value=slice_value,
-        slice_tol=slice_tol, max_points=max_points,
+        slice_tol=slice_tol, max_points=max_points, polarization=polarization,
     )
     if validation_error:
         return validation_error
@@ -196,6 +196,7 @@ def _component_index(name: str) -> int:
 def _validate_field_request(
     *, wl_um: float, D: list[float], nn: list[int], component: str,
     slice_axis: str, slice_value: float, slice_tol: float, max_points: int,
+    polarization: int = 1,
 ) -> dict[str, Any] | None:
     values = [wl_um, slice_value, slice_tol, *D]
     try:
@@ -221,6 +222,10 @@ def _validate_field_request(
             "status": "error", "error_code": "invalid_max_points",
             "hard_max_points": HARD_MAX_FIELD_POINTS,
         }
+    if polarization == -1:
+        return {"status": "error", "error_code": "unsupported_polarization"}
+    if polarization != 1:
+        return {"status": "error", "error_code": "invalid_polarization"}
     return None
 
 
