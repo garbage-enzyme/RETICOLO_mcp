@@ -14,6 +14,7 @@ import re
 import time
 import uuid
 from collections import deque
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ SCHEMA_VERSION = "1"
 MAX_SPEC_BYTES = 256 * 1024
 MAX_JOB_ID_LEN = 128
 MAX_EVENT_TAIL = 100
+MAX_EVENT_BYTES = 16 * 1024
+MAX_EVENT_JOURNAL_BYTES = 8 * 1024 * 1024
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -176,30 +179,22 @@ def transition_state(
     mutex_name = "Global\\reticolo_mcp_job_" + hashlib.sha256(
         _validate_job_id(job_id).encode("utf-8")
     ).hexdigest()[:24]
-    kernel32 = ctypes.windll.kernel32
-    mutex = kernel32.CreateMutexW(None, False, mutex_name)
-    if not mutex:
-        return {"updated": False, "reason": "mutex_create_failed"}
-    acquired = False
     try:
-        wait_result = kernel32.WaitForSingleObject(mutex, 5000)
-        acquired = wait_result in (0, 0x80)
-        if not acquired:
-            return {"updated": False, "reason": "mutex_timeout"}
-        current = read_state(job_id)
-        if current is None:
-            return {"updated": False, "reason": "job_not_found", "state": None}
-        if attempt_id is not None and current.get("attempt_id") != attempt_id:
-            return {"updated": False, "reason": "stale_attempt", "state": current}
-        if current.get("status") not in allowed_from:
-            return {"updated": False, "reason": "invalid_transition", "state": current}
-        new_state = {**current, **updates}
-        write_state(job_id, new_state)
-        return {"updated": True, "state": new_state}
-    finally:
-        if acquired:
-            kernel32.ReleaseMutex(mutex)
-        kernel32.CloseHandle(mutex)
+        with _named_mutex(mutex_name):
+            current = read_state(job_id)
+            if current is None:
+                return {"updated": False, "reason": "job_not_found", "state": None}
+            if attempt_id is not None and current.get("attempt_id") != attempt_id:
+                return {"updated": False, "reason": "stale_attempt", "state": current}
+            if current.get("status") not in allowed_from:
+                return {"updated": False, "reason": "invalid_transition", "state": current}
+            new_state = {**current, **updates}
+            write_state(job_id, new_state)
+            return {"updated": True, "state": new_state}
+    except TimeoutError:
+        return {"updated": False, "reason": "mutex_timeout"}
+    except OSError:
+        return {"updated": False, "reason": "mutex_create_failed"}
 
 
 def write_state(job_id: str, state: dict[str, Any]) -> None:
@@ -226,13 +221,29 @@ def read_state(job_id: str) -> dict[str, Any] | None:
 
 def append_event(job_id: str, event: dict[str, Any]) -> None:
     """Append one event to the job journal, flushed and fsynced."""
-    event.setdefault("timestamp", time.time())
-    event.setdefault("event_id", uuid.uuid4().hex[:12])
     path = _job_dir(job_id, create=True) / "events.jsonl"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, sort_keys=True) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
+    mutex_name = "Global\\reticolo_mcp_event_" + hashlib.sha256(
+        _validate_job_id(job_id).encode("utf-8")
+    ).hexdigest()[:24]
+    with _named_mutex(mutex_name):
+        previous = _last_event(path)
+        record = dict(event)
+        record.setdefault("timestamp", time.time())
+        record.setdefault("event_id", uuid.uuid4().hex[:12])
+        record["sequence"] = int(previous.get("sequence", 0)) + 1 if previous else 1
+        record["previous_hash"] = previous.get("event_hash", "0" * 64) if previous else "0" * 64
+        canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        record["event_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        encoded = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
+        if len(encoded) > MAX_EVENT_BYTES:
+            raise ValueError("event exceeds MAX_EVENT_BYTES")
+        current_size = path.stat().st_size if path.exists() else 0
+        if current_size + len(encoded) > MAX_EVENT_JOURNAL_BYTES:
+            raise ValueError("event journal exceeds MAX_EVENT_JOURNAL_BYTES")
+        with open(path, "ab") as f:
+            f.write(encoded)
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def read_events(job_id: str, tail: int = 50) -> list[dict[str, Any]]:
@@ -257,6 +268,34 @@ def read_events(job_id: str, tail: int = 50) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pass
     return events
+
+
+def verify_event_chain(job_id: str) -> dict[str, Any]:
+    path = _job_dir(job_id) / "events.jsonl"
+    if not path.exists():
+        return {"valid": True, "events": 0}
+    expected_previous = "0" * 64
+    expected_sequence = 1
+    count = 0
+    with open(path, "r", encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                return {"valid": False, "line": line_number, "reason": "malformed"}
+            stored_hash = record.pop("event_hash", "")
+            canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
+            actual_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            if stored_hash != actual_hash:
+                return {"valid": False, "line": line_number, "reason": "hash"}
+            if record.get("previous_hash") != expected_previous:
+                return {"valid": False, "line": line_number, "reason": "previous_hash"}
+            if record.get("sequence") != expected_sequence:
+                return {"valid": False, "line": line_number, "reason": "sequence"}
+            expected_previous = stored_hash
+            expected_sequence += 1
+            count += 1
+    return {"valid": True, "events": count, "last_hash": expected_previous}
 
 
 # ------------------------------------------------------------------
@@ -295,3 +334,47 @@ def _normalize_textures(textures: list[Any]) -> list[Any]:
         else:
             result.append(str(tex))
     return result
+
+
+def _last_event(path: Path) -> dict[str, Any] | None:
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    last = ""
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                last = line
+    if not last:
+        return None
+    try:
+        event = json.loads(last)
+    except json.JSONDecodeError as exc:
+        raise ValueError("cannot append after malformed event") from exc
+    if not isinstance(event, dict) or not event.get("event_hash"):
+        raise ValueError("cannot append after unverifiable event")
+    stored_hash = event.get("event_hash")
+    content = dict(event)
+    content.pop("event_hash", None)
+    canonical = json.dumps(content, sort_keys=True, separators=(",", ":"))
+    if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != stored_hash:
+        raise ValueError("cannot append after tampered event")
+    return event
+
+
+@contextmanager
+def _named_mutex(name: str):
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, False, name)
+    if not mutex:
+        raise OSError("cannot create named mutex")
+    acquired = False
+    try:
+        wait_result = kernel32.WaitForSingleObject(mutex, 5000)
+        acquired = wait_result in (0, 0x80)
+        if not acquired:
+            raise TimeoutError("named mutex timeout")
+        yield
+    finally:
+        if acquired:
+            kernel32.ReleaseMutex(mutex)
+        kernel32.CloseHandle(mutex)

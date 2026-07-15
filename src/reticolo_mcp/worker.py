@@ -34,6 +34,8 @@ from reticolo_mcp.engine import REticoloEngine
 from reticolo_mcp.config import RETICOLO_DIR
 from reticolo_mcp.sweep import run_sweep
 
+MAX_WORKER_LOG_BYTES = 4 * 1024 * 1024
+
 
 def _to_complex(textures: list[Any]) -> list[Any]:
     """Convert JSON-safe [[re, im], ...] textures to Python complex numbers."""
@@ -253,14 +255,49 @@ def _setup_logging(job_id: str) -> None:
     log_path = worker_log_path(job_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # redirect stdout/stderr to worker log
-    log_fh = open(str(log_path), "a", encoding="utf-8")
-    sys.stdout = log_fh
-    sys.stderr = log_fh
+    log_fh = open(str(log_path), "ab")
+    bounded = _BoundedLogWriter(log_fh, MAX_WORKER_LOG_BYTES)
+    sys.stdout = bounded
+    sys.stderr = bounded
 
 
 def _log(job_id: str, message: str) -> None:
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
     print(f"[{ts}] [{job_id}] {message}", flush=True)
+
+
+class _BoundedLogWriter:
+    """Text writer that never lets one worker log exceed its byte budget."""
+
+    def __init__(self, raw: Any, max_bytes: int) -> None:
+        self.raw = raw
+        self.max_bytes = max_bytes
+        self.truncated = False
+
+    def write(self, text: str) -> int:
+        encoded = text.encode("utf-8", errors="replace")
+        remaining = max(0, self.max_bytes - self.raw.tell())
+        if remaining <= 0:
+            self.truncated = True
+            return len(text)
+        chunk = encoded[:remaining]
+        while chunk:
+            try:
+                chunk.decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                chunk = chunk[:-1]
+        self.raw.write(chunk)
+        if len(chunk) < len(encoded):
+            self.truncated = True
+        return len(text)
+
+    def flush(self) -> None:
+        self.raw.flush()
+        os.fsync(self.raw.fileno())
+
+    def isatty(self) -> bool:
+        return False
 
 
 if __name__ == "__main__":

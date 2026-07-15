@@ -19,6 +19,7 @@ from reticolo_mcp.jobs import (
     write_spec,
     write_state,
     transition_state,
+    verify_event_chain,
     worker_log_path,
 )
 
@@ -75,6 +76,7 @@ class TestJobStore:
     def _isolated(self, tmp_path, monkeypatch):
         monkeypatch.setattr("reticolo_mcp.jobs.RUNTIME_DIR", tmp_path)
         self.job_id = "test-job-001"
+        self.runtime_path = tmp_path
 
     def test_spec_write_read(self):
         spec = create_job_spec(wls_um=[5.0], D=[1.0], nn=[5, 5],
@@ -148,6 +150,8 @@ class TestJobStore:
         events = read_events(self.job_id)
         assert len(events) == 2
         assert events[0]["event"] == "start"
+        assert [event["sequence"] for event in events] == [1, 2]
+        assert verify_event_chain(self.job_id)["valid"] is True
 
     def test_events_tail(self):
         for i in range(10):
@@ -163,6 +167,22 @@ class TestJobStore:
         events = read_events(self.job_id, tail=MAX_EVENT_TAIL + 1000)
         assert len(events) == MAX_EVENT_TAIL
         assert events[-1]["event"] == f"e{MAX_EVENT_TAIL + 4}"
+
+    def test_event_chain_detects_tamper(self):
+        append_event(self.job_id, {"event": "start"})
+        path = self.runtime_path / "jobs" / self.job_id / "events.jsonl"
+        text = path.read_text(encoding="utf-8").replace('"start"', '"changed"')
+        path.write_text(text, encoding="utf-8")
+        result = verify_event_chain(self.job_id)
+        assert result["valid"] is False
+        assert result["reason"] == "hash"
+        with pytest.raises(ValueError, match="tampered"):
+            append_event(self.job_id, {"event": "must-not-append"})
+
+    def test_event_size_cap(self, monkeypatch):
+        monkeypatch.setattr("reticolo_mcp.jobs.MAX_EVENT_BYTES", 200)
+        with pytest.raises(ValueError, match="MAX_EVENT_BYTES"):
+            append_event(self.job_id, {"event": "x", "payload": "y" * 500})
 
     def test_read_missing_job_has_no_write_side_effect(self, tmp_path):
         assert read_state("missing-job") is None

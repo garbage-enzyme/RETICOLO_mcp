@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from reticolo_mcp.worker import _cancel_requested, _to_complex
+from io import BytesIO
+
+from reticolo_mcp.worker import _BoundedLogWriter, _cancel_requested, _to_complex
 
 
 class TestToComplex:
@@ -95,3 +97,20 @@ class TestCancelControl:
             },
         )
         assert _cancel_requested("job-abc", "attempt-1") is True
+
+
+class TestBoundedLogWriter:
+    def test_truncates_at_byte_budget(self):
+        raw = BytesIO()
+        writer = _BoundedLogWriter(raw, 5)
+        assert writer.write("abcdef") == 6
+        assert raw.getvalue() == b"abcde"
+        assert writer.truncated is True
+        writer.write("more")
+        assert raw.getvalue() == b"abcde"
+
+    def test_does_not_split_utf8_codepoint(self):
+        raw = BytesIO()
+        writer = _BoundedLogWriter(raw, 2)
+        writer.write("中a")
+        assert raw.getvalue().decode("utf-8") == ""
