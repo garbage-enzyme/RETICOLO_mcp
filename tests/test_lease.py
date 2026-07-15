@@ -106,9 +106,15 @@ class TestLeaseLifecycle:
         assert status["ready"] is False
         assert status["reticolo_lease"]["state"] == "stale_live"
         assert lease_acquire("contender")["acquired"] is False
-        data["heartbeat"] = time.time()
-        self.lease_path.write_text(json.dumps(data), encoding="utf-8")
         assert lease_release(acquired["token"])["released"] is True
+
+    def test_stale_live_owner_cannot_release_with_wrong_token(self):
+        lease_acquire("test")
+        data = json.loads(self.lease_path.read_text(encoding="utf-8"))
+        data["heartbeat"] = time.time() - 1000
+        self.lease_path.write_text(json.dumps(data), encoding="utf-8")
+        assert lease_release("wrong-token")["released"] is False
+        assert self.lease_path.exists()
 
     def test_live_owner_without_creation_date_is_malformed(self):
         acquired = lease_acquire("test")

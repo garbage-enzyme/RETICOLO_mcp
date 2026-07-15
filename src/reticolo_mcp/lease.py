@@ -271,9 +271,15 @@ def lease_heartbeat(token: str) -> bool:
 
 def lease_release(token: str | None = None) -> dict[str, Any]:
     """Release the solver lease if PID and optional owner token match."""
-    our = _read_lease(LEASE_PATH)
-    if our is None:
+    inspection = _inspect_lease(LEASE_PATH)
+    our = inspection.get("data") or {}
+    if inspection["state"] == "absent":
         return {"released": False, "detail": "no active lease"}
+    if inspection["state"] not in {"active", "stale_live"}:
+        return {
+            "released": False,
+            "detail": f"lease evidence is {inspection['state']}",
+        }
     if our.get("pid") != os.getpid():
         return {"released": False, "detail": "lease owned by another process"}
     if token is not None and our.get("token") != token:
