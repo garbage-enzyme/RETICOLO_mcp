@@ -25,11 +25,24 @@ class TestArange:
 
     def test_step_larger_than_range(self):
         result = _arange(0, 0.5, 1.0)
-        assert result == [0.0, 1.0]
+        assert result == [0.0]
 
     def test_negative_range(self):
         result = _arange(-1.0, 0.0, 0.5)
         assert result == [-1.0, -0.5, 0.0]
+
+    @pytest.mark.parametrize("step", [0.0, -0.1])
+    def test_nonpositive_step_rejected(self, step):
+        with pytest.raises(ValueError, match="positive"):
+            _arange(0.0, 1.0, step)
+
+    def test_descending_range_rejected(self):
+        with pytest.raises(ValueError, match="stop"):
+            _arange(1.0, 0.0, 0.1)
+
+    def test_nonfinite_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            _arange(0.0, float("inf"), 0.1)
 
 
 class TestBranchComparison:

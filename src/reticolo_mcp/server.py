@@ -20,6 +20,7 @@ from . import __version__
 from .config import (
     EXPERIMENTAL_ENABLED,
     MAX_CONFIG_ID_LEN,
+    MAX_FOURIER_ORDER,
     MAX_JOB_POINTS,
     MAX_TEXTURES,
     RETICOLO_DIR,
@@ -63,6 +64,9 @@ def _validate_solve_inputs(
     if len(nn) != 2 or not all(isinstance(n, int) and n >= 1 for n in nn):
         return {"status": "error", "error_code": "invalid_nn",
                 "detail": "nn must be [nx, ny] with positive integers"}
+    if any(n > MAX_FOURIER_ORDER for n in nn):
+        return {"status": "error", "error_code": "order_limit_exceeded",
+                "detail": f"maximum Fourier order is {MAX_FOURIER_ORDER}"}
     if len(textures) > MAX_TEXTURES:
         return {"status": "error", "error_code": "too_many_textures",
                 "detail": f"max {MAX_TEXTURES} textures, got {len(textures)}"}
@@ -471,6 +475,25 @@ def reticolo_convergence(
         return {
             "status": "error", "error_code": "experimental_tool_disabled",
             "detail": "set RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host",
+        }
+    numeric = [
+        coarse_start, coarse_end, coarse_step, fine_half, fine_step,
+        tol_wl, tol_A, tol_fwhm_nm,
+    ]
+    if not all(math.isfinite(float(value)) for value in numeric):
+        return {"status": "error", "error_code": "nonfinite_convergence_input"}
+    if coarse_end <= coarse_start:
+        return {"status": "error", "error_code": "invalid_convergence_range"}
+    if coarse_step <= 0 or fine_half <= 0 or fine_step <= 0:
+        return {"status": "error", "error_code": "invalid_convergence_step"}
+    if any(value < 0 for value in (tol_wl, tol_A, tol_fwhm_nm)):
+        return {"status": "error", "error_code": "invalid_convergence_tolerance"}
+    coarse_points = math.floor((coarse_end - coarse_start) / coarse_step) + 1
+    fine_points = math.floor((2 * fine_half) / fine_step) + 1
+    if coarse_points > MAX_JOB_POINTS or fine_points > MAX_JOB_POINTS:
+        return {
+            "status": "error", "error_code": "convergence_point_limit_exceeded",
+            "max_points_per_stage": MAX_JOB_POINTS,
         }
     err = _validate_solve_inputs(
         wl_um=coarse_start, D=D, nn=nn, textures=textures,

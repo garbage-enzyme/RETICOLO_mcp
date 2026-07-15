@@ -79,6 +79,11 @@ class TestValidateSolveInputs:
         assert err is not None
         assert err["error_code"] == "invalid_nn"
 
+    def test_nn_over_hard_limit(self):
+        err = self._valid(nn=[64, 5])
+        assert err is not None
+        assert err["error_code"] == "order_limit_exceeded"
+
     def test_invalid_polarization(self):
         err = self._valid(polarization=0)
         assert err is not None
@@ -194,3 +199,13 @@ class TestExperimentalGates:
             profil={"heights": [0, 0], "indices": [1, 1]}, component="bad",
         )
         assert result["error_code"] == "invalid_field_component"
+
+    @pytest.mark.parametrize("step", [0.0, -0.1])
+    def test_enabled_convergence_rejects_nonpositive_step(self, monkeypatch, step):
+        monkeypatch.setattr(server, "EXPERIMENTAL_ENABLED", True)
+        result = server.reticolo_convergence(
+            coarse_start=5.0, coarse_end=5.1, coarse_step=step,
+            D=[1.0], nn=[5, 7], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "invalid_convergence_step"

@@ -270,9 +270,11 @@ def _nearest_crossing(
 
 
 def _arange(start: float, stop: float, step: float) -> list[float]:
-    result = []
-    val = start
-    while val <= stop + step / 2:
-        result.append(round(val, 9))
-        val += step
-    return result
+    if not all(math.isfinite(value) for value in (start, stop, step)):
+        raise ValueError("arange values must be finite")
+    if step <= 0:
+        raise ValueError("arange step must be positive")
+    if stop < start:
+        raise ValueError("arange stop must be >= start")
+    count = math.floor((stop - start) / step + 1e-12) + 1
+    return [float(f"{start + index * step:.15g}") for index in range(count)]
