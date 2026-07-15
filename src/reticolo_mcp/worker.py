@@ -26,7 +26,6 @@ from reticolo_mcp.jobs import (
     read_spec,
     read_state,
     results_path,
-    write_state,
     transition_state,
     worker_log_path,
 )
@@ -83,23 +82,31 @@ def main(job_id: str | None = None) -> int:
         job_id = sys.argv[1]
     _setup_logging(job_id)
 
-    spec = read_spec(job_id)
-    if spec is None:
-        _log(job_id, "spec not found")
-        return 1
-
-    # Convert JSON-safe [re, im] pairs back to Python complex
-    spec["_textures_complex"] = _to_complex(spec.get("textures", []))
-
     try:
+        spec = read_spec(job_id)
+        if spec is None:
+            _log(job_id, "spec not found")
+            return 1
+        # Convert JSON-safe [re, im] pairs back to Python complex.
+        spec["_textures_complex"] = _to_complex(spec.get("textures", []))
         return _run_job(job_id, spec)
     except Exception:
         traceback.print_exc()
         try:
-            write_state(job_id, {
-                "status": "failed", "worker_pid": os.getpid(),
-                "error": traceback.format_exc()[-1000:],
-            })
+            current = read_state(job_id) or {}
+            attempt_id = str(current.get("attempt_id", ""))
+            status = current.get("status")
+            if status:
+                transition_state(
+                    job_id,
+                    allowed_from={status},
+                    attempt_id=attempt_id,
+                    updates={
+                        "status": "failed",
+                        "worker_pid": os.getpid(),
+                        "error": traceback.format_exc()[-1000:],
+                    },
+                )
         except Exception:
             pass
         return 1

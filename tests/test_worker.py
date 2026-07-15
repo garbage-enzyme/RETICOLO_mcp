@@ -6,7 +6,7 @@ from io import BytesIO
 
 from reticolo_mcp.worker import (
     _BoundedLogWriter, _admit_point, _cancel_requested, _finalize_cleanup,
-    _to_complex,
+    _to_complex, main,
 )
 
 
@@ -210,3 +210,30 @@ class TestFinalCleanup:
         assert _finalize_cleanup("job-abc", "attempt-1", engine) is False
         assert updates[0]["cleanup"]["error_code"] == "engine_stop_raised"
         assert len(updates[0]["cleanup"]["detail"]) == 500
+
+
+def test_main_crash_uses_attempt_scoped_transition(monkeypatch):
+    transitions = []
+    monkeypatch.setattr("reticolo_mcp.worker._setup_logging", lambda _job_id: None)
+    monkeypatch.setattr(
+        "reticolo_mcp.worker.read_spec",
+        lambda _job_id: {"textures": [[]]},
+    )
+    monkeypatch.setattr(
+        "reticolo_mcp.worker.read_state",
+        lambda _job_id: {
+            "status": "submitted",
+            "attempt_id": "attempt-current",
+            "attempt": 2,
+        },
+    )
+    monkeypatch.setattr(
+        "reticolo_mcp.worker.transition_state",
+        lambda *args, **kwargs: transitions.append((args, kwargs))
+        or {"updated": True},
+    )
+    assert main("job-abc") == 1
+    assert len(transitions) == 1
+    assert transitions[0][1]["attempt_id"] == "attempt-current"
+    assert transitions[0][1]["allowed_from"] == {"submitted"}
+    assert transitions[0][1]["updates"]["status"] == "failed"
