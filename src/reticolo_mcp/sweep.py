@@ -37,6 +37,7 @@ def run_sweep(
     csv_path: str | Path,
     resume: bool = True,
     should_cancel: Callable[[], bool] | None = None,
+    before_point: Callable[[float], dict[str, Any] | None] | None = None,
 ) -> dict[str, Any]:
     """Run a wavelength sweep with per-row CSV persistence.
 
@@ -95,6 +96,7 @@ def run_sweep(
     t0 = time.time()
     solved = 0
     errors = 0
+    admission_stop: dict[str, Any] | None = None
 
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -103,6 +105,10 @@ def run_sweep(
 
         for wl in pending:
             if _cancel_requested(should_cancel):
+                break
+            admission = _point_admission(before_point, wl)
+            if admission and admission.get("decision") != "green":
+                admission_stop = admission
                 break
             row_time = time.time()
             result = engine.solve_point(
@@ -150,10 +156,12 @@ def run_sweep(
         "config_hash": config_hash,
         "status": (
             "cancel_requested" if cancel_observed
+            else "resource_refused" if admission_stop
             else "completed" if errors == 0
             else "completed_with_errors"
         ),
         "cancel_observed": cancel_observed,
+        "resource_decision": admission_stop,
     }
 
 
@@ -165,6 +173,23 @@ def _cancel_requested(callback: Callable[[], bool] | None) -> bool:
         return bool(callback())
     except Exception:
         return True
+
+
+def _point_admission(
+    callback: Callable[[float], dict[str, Any] | None] | None, wl: float,
+) -> dict[str, Any] | None:
+    if callback is None:
+        return None
+    try:
+        decision = callback(wl)
+    except Exception as exc:
+        return {
+            "decision": "refuse", "reason": "resource_callback_failed",
+            "detail": f"{type(exc).__name__}: {str(exc)[:200]}",
+        }
+    if decision is None:
+        return {"decision": "refuse", "reason": "resource_decision_missing"}
+    return decision
 
 
 # ------------------------------------------------------------------

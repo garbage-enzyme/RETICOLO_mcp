@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from reticolo_mcp.worker import _BoundedLogWriter, _cancel_requested, _to_complex
+from reticolo_mcp.worker import (
+    _BoundedLogWriter, _admit_point, _cancel_requested, _to_complex,
+)
 
 
 class TestToComplex:
@@ -114,3 +116,30 @@ class TestBoundedLogWriter:
         writer = _BoundedLogWriter(raw, 2)
         writer.write("中a")
         assert raw.getvalue().decode("utf-8") == ""
+
+
+def test_point_admission_persists_evidence(monkeypatch):
+    from reticolo_mcp.resources import ResourceSnapshot
+
+    policy = {
+        "min_available_memory_fraction": 0.1,
+        "warning_available_memory_fraction": 0.2,
+        "min_commit_remaining_fraction": 0.1,
+        "warning_commit_remaining_fraction": 0.2,
+        "min_runtime_free_fraction": 0.1,
+        "warning_runtime_free_fraction": 0.2,
+        "max_points": 10, "wall_budget_s": 3600,
+        "min_next_point_time_s": 60,
+    }
+    monkeypatch.setattr(
+        "reticolo_mcp.worker.sample_resources",
+        lambda **_kwargs: ResourceSnapshot(
+            available_memory_fraction=0.5, commit_remaining_fraction=0.5,
+            runtime_free_fraction=0.5, remaining_wall_s=3500,
+        ),
+    )
+    events = []
+    monkeypatch.setattr("reticolo_mcp.worker.append_event", lambda _job, event: events.append(event))
+    decision = _admit_point("job-abc", "attempt-1", {"resource_policy": policy}, 5.0, 0.0)
+    assert decision["decision"] == "green"
+    assert events[0]["event"] == "pre_point_resource_admission"

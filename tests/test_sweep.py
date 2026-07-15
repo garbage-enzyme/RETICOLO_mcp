@@ -61,6 +61,34 @@ class TestReadCompleted:
 
 
 class TestRunSweep:
+    def test_resource_refusal_stops_before_point(self, tmp_path):
+        engine = MagicMock()
+        result = run_sweep(
+            engine, wls_um=[5.0], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_id="resource-stop", csv_path=tmp_path / "sweep.csv",
+            before_point=lambda _wl: {"decision": "refuse", "reason": "memory"},
+        )
+        assert result["status"] == "resource_refused"
+        assert result["resource_decision"]["reason"] == "memory"
+        engine.solve_point.assert_not_called()
+
+    def test_resource_callback_failure_fails_closed(self, tmp_path):
+        engine = MagicMock()
+
+        def broken(_wl):
+            raise RuntimeError("telemetry unavailable")
+
+        result = run_sweep(
+            engine, wls_um=[5.0], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_id="resource-error", csv_path=tmp_path / "sweep.csv",
+            before_point=broken,
+        )
+        assert result["status"] == "resource_refused"
+        assert result["resource_decision"]["reason"] == "resource_callback_failed"
+        engine.solve_point.assert_not_called()
+
     def test_rejects_mixed_hash_after_first_row(self, tmp_path):
         engine = MagicMock()
         csv_path = tmp_path / "mixed.csv"

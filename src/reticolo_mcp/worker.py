@@ -33,6 +33,7 @@ from reticolo_mcp.jobs import (
 from reticolo_mcp.engine import REticoloEngine
 from reticolo_mcp.config import RETICOLO_DIR
 from reticolo_mcp.sweep import run_sweep
+from reticolo_mcp.resources import ResourcePolicy, evaluate_admission, sample_resources
 
 MAX_WORKER_LOG_BYTES = 4 * 1024 * 1024
 
@@ -157,6 +158,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
 
         csv = str(results_path(job_id))
         D = spec.get("D", [1.0])
+        job_started_monotonic = time.monotonic()
 
         result = run_sweep(
             engine=eng,
@@ -174,6 +176,9 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             csv_path=csv,
             resume=True,
             should_cancel=lambda: _cancel_requested(job_id, attempt_id),
+            before_point=lambda wl: _admit_point(
+                job_id, attempt_id, spec, wl, job_started_monotonic,
+            ),
         )
 
         if result.get("cancel_observed"):
@@ -198,6 +203,22 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 "errors": result["errors"],
             })
             _log(job_id, "cancellation observed at a safe point boundary")
+            return 0
+
+        if result.get("status") == "resource_refused":
+            transition_state(
+                job_id, allowed_from={"running"}, attempt_id=attempt_id,
+                updates={
+                    "status": "resource_refused",
+                    "resource_decision": result.get("resource_decision"),
+                    "solved": result["solved"], "skipped": result["skipped"],
+                    "errors": result["errors"],
+                },
+            )
+            append_event(job_id, {
+                "event": "resource_refused_before_point",
+                "decision": result.get("resource_decision"),
+            })
             return 0
 
         terminal = transition_state(job_id, allowed_from={"running"},
@@ -263,6 +284,23 @@ def _cancel_requested(job_id: str, attempt_id: str = "") -> bool:
     if not state or state.get("status") not in {"cancel_requested", "cancelling"}:
         return False
     return not attempt_id or state.get("attempt_id") == attempt_id
+
+
+def _admit_point(
+    job_id: str, attempt_id: str, spec: dict[str, Any], wl: float,
+    started_monotonic: float,
+) -> dict[str, Any]:
+    policy = ResourcePolicy.model_validate(spec.get("resource_policy"))
+    remaining_wall = max(
+        0.0, policy.wall_budget_s - (time.monotonic() - started_monotonic),
+    )
+    snapshot = sample_resources(remaining_wall_s=remaining_wall)
+    decision = evaluate_admission(policy, snapshot, point_count=1)
+    append_event(job_id, {
+        "event": "pre_point_resource_admission", "attempt_id": attempt_id,
+        "wl_um": wl, "decision": decision,
+    })
+    return decision
 
 
 def _setup_logging(job_id: str) -> None:
