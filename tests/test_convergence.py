@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from reticolo_mcp.convergence import _arange, _estimate_fwhm
+from reticolo_mcp.convergence import _arange, _compare_peak_sets, _estimate_fwhm
 
 
 class TestArange:
@@ -30,6 +30,59 @@ class TestArange:
     def test_negative_range(self):
         result = _arange(-1.0, 0.0, 0.5)
         assert result == [-1.0, -0.5, 0.0]
+
+
+class TestBranchComparison:
+    def test_requires_width_convergence(self):
+        previous = [{
+            "branch_id": "branch-001", "wl_um": 5.0, "A": 0.9,
+            "fwhm_nm": 10.0,
+        }]
+        current = [{"wl_um": 5.001, "A": 0.905, "fwhm_nm": None}]
+        result, _ = _compare_peak_sets(
+            previous, current, next_branch_index=2,
+            tol_wl_um=0.002, tol_A=0.01, tol_fwhm_nm=1.0,
+        )
+        assert result[0]["convergence"] == "partial"
+        assert result[0]["delta_fwhm_nm"] is None
+
+    def test_all_three_metrics_can_converge(self):
+        previous = [{
+            "branch_id": "branch-001", "wl_um": 5.0, "A": 0.9,
+            "fwhm_nm": 10.0,
+        }]
+        current = [{"wl_um": 5.001, "A": 0.905, "fwhm_nm": 10.5}]
+        result, _ = _compare_peak_sets(
+            previous, current, next_branch_index=2,
+            tol_wl_um=0.002, tol_A=0.01, tol_fwhm_nm=1.0,
+        )
+        assert result[0]["convergence"] == "converged"
+        assert result[0]["branch_id"] == "branch-001"
+
+    def test_matching_is_one_to_one(self):
+        previous = [
+            {"branch_id": "branch-001", "wl_um": 5.00, "A": 0.8, "fwhm_nm": 10.0},
+            {"branch_id": "branch-002", "wl_um": 5.03, "A": 0.7, "fwhm_nm": 12.0},
+        ]
+        current = [
+            {"wl_um": 5.029, "A": 0.7, "fwhm_nm": 12.0},
+            {"wl_um": 5.001, "A": 0.8, "fwhm_nm": 10.0},
+        ]
+        result, _ = _compare_peak_sets(
+            previous, current, next_branch_index=3,
+            tol_wl_um=0.002, tol_A=0.01, tol_fwhm_nm=1.0,
+        )
+        assert [item["branch_id"] for item in result] == ["branch-002", "branch-001"]
+
+    def test_unmatched_peak_gets_new_stable_id(self):
+        result, next_index = _compare_peak_sets(
+            [], [{"wl_um": 5.0, "A": 0.8, "fwhm_nm": 10.0}],
+            next_branch_index=4, tol_wl_um=0.002, tol_A=0.01,
+            tol_fwhm_nm=1.0,
+        )
+        assert result[0]["branch_id"] == "branch-004"
+        assert result[0]["convergence"] == "new"
+        assert next_index == 5
 
 
 class TestEstimateFWHM:

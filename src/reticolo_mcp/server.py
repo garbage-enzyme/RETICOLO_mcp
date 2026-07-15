@@ -439,6 +439,7 @@ def reticolo_convergence(
     fine_step: float = 0.002,
     tol_wl: float = 0.002,
     tol_A: float = 0.01,
+    tol_fwhm_nm: float = 1.0,
 ) -> dict:
     """Run progressive harmonic convergence over Fourier orders.
 
@@ -464,7 +465,7 @@ def reticolo_convergence(
         polarization=polarization,
         output_dir=out_dir,
         config_label=config_label or "conv",
-        tol_wl_um=tol_wl, tol_A=tol_A,
+        tol_wl_um=tol_wl, tol_A=tol_A, tol_fwhm_nm=tol_fwhm_nm,
     )
 
 

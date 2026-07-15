@@ -40,6 +40,7 @@ def run_convergence(
     config_label: str = "",
     tol_wl_um: float = 0.002,
     tol_A: float = 0.01,
+    tol_fwhm_nm: float = 1.0,
 ) -> dict[str, Any]:
     """Run progressive harmonic convergence over nn orders.
 
@@ -51,7 +52,8 @@ def run_convergence(
     t0 = time.time()
     orders: list[dict[str, Any]] = []
 
-    prev_peaks: dict[int, dict[str, Any]] = {}
+    prev_peaks: list[dict[str, Any]] = []
+    next_branch_index = 1
 
     for nn_val in range(nn_start, nn_max + 1, nn_step):
         nn = [nn_val, nn_val]
@@ -99,38 +101,14 @@ def run_convergence(
                 fwhm = _estimate_fwhm(fine_csv)
                 best["fwhm_nm"] = fwhm
                 best["Q"] = best["wl_um"] / (fwhm / 1000) if fwhm and fwhm > 0 else None
+                best["baseline_rule"] = "absolute_zero"
                 fine_peaks.append(best)
 
-        # Compare with previous order
-        converged: list[dict[str, Any]] = []
-        for pk in fine_peaks:
-            pk_wl = pk["wl_um"]
-            conv_status = "new"
-            matched_prev = None
-            for pid, prev in prev_peaks.items():
-                if abs(pk_wl - prev["wl_um"]) < 0.05:
-                    matched_prev = prev
-                    dwl = abs(pk_wl - prev["wl_um"])
-                    dA = abs(pk["A"] - prev.get("A", 0))
-                    if dwl <= tol_wl_um and dA <= tol_A:
-                        conv_status = "converged"
-                    else:
-                        conv_status = "partial"
-                    break
-
-            entry = {
-                "wl_um": pk_wl,
-                "A": pk["A"],
-                "R": pk.get("R"),
-                "T": pk.get("T"),
-                "fwhm_nm": pk.get("fwhm_nm"),
-                "Q": pk.get("Q"),
-                "convergence": conv_status,
-            }
-            if matched_prev:
-                entry["delta_wl_um"] = abs(pk_wl - matched_prev["wl_um"])
-                entry["delta_A"] = abs(pk["A"] - matched_prev.get("A", 0))
-            converged.append(entry)
+        converged, next_branch_index = _compare_peak_sets(
+            prev_peaks, fine_peaks, next_branch_index=next_branch_index,
+            tol_wl_um=tol_wl_um, tol_A=tol_A,
+            tol_fwhm_nm=tol_fwhm_nm,
+        )
 
         order_summary = {
             "nn": [nn_val, nn_val],
@@ -145,14 +123,85 @@ def run_convergence(
                              encoding="utf-8")
 
         orders.append(order_summary)
-        prev_peaks = {i: pk for i, pk in enumerate(fine_peaks)}
+        prev_peaks = converged
+
+    final_peaks = orders[-1]["converged_peaks"] if orders else []
+    convergence_reached = bool(
+        len(orders) >= 2 and final_peaks
+        and all(pk["convergence"] == "converged" for pk in final_peaks)
+    )
 
     return {
+        "status": "converged" if convergence_reached else "convergence_not_reached",
         "orders": orders,
         "nn_range": [nn_start, nn_max, nn_step],
         "runtime_s": round(time.time() - t0, 1),
         "output_dir": str(output_dir),
     }
+
+
+def _compare_peak_sets(
+    previous: list[dict[str, Any]], current: list[dict[str, Any]], *,
+    next_branch_index: int, tol_wl_um: float, tol_A: float,
+    tol_fwhm_nm: float, max_match_shift_um: float = 0.05,
+) -> tuple[list[dict[str, Any]], int]:
+    """Match branches one-to-one and require center, amplitude, and width."""
+    candidates = sorted(
+        (
+            (abs(cur["wl_um"] - prev["wl_um"]), cur_i, prev_i)
+            for cur_i, cur in enumerate(current)
+            for prev_i, prev in enumerate(previous)
+            if abs(cur["wl_um"] - prev["wl_um"]) <= max_match_shift_um
+        ),
+        key=lambda item: (item[0], item[1], item[2]),
+    )
+    matches: dict[int, int] = {}
+    used_previous: set[int] = set()
+    for _distance, current_index, previous_index in candidates:
+        if current_index in matches or previous_index in used_previous:
+            continue
+        matches[current_index] = previous_index
+        used_previous.add(previous_index)
+
+    result: list[dict[str, Any]] = []
+    for current_index, peak in enumerate(current):
+        entry = {
+            "wl_um": peak["wl_um"], "A": peak["A"],
+            "R": peak.get("R"), "T": peak.get("T"),
+            "fwhm_nm": peak.get("fwhm_nm"), "Q": peak.get("Q"),
+            "baseline_rule": peak.get("baseline_rule", "absolute_zero"),
+        }
+        previous_index = matches.get(current_index)
+        if previous_index is None:
+            entry["branch_id"] = f"branch-{next_branch_index:03d}"
+            next_branch_index += 1
+            entry["convergence"] = "new"
+            result.append(entry)
+            continue
+
+        prior = previous[previous_index]
+        entry["branch_id"] = prior.get("branch_id", f"branch-{previous_index + 1:03d}")
+        delta_wl = abs(peak["wl_um"] - prior["wl_um"])
+        delta_a = abs(peak["A"] - prior["A"])
+        current_width = peak.get("fwhm_nm")
+        previous_width = prior.get("fwhm_nm")
+        delta_width = (
+            abs(current_width - previous_width)
+            if current_width is not None and previous_width is not None else None
+        )
+        entry.update({
+            "delta_wl_um": delta_wl,
+            "delta_A": delta_a,
+            "delta_fwhm_nm": delta_width,
+        })
+        entry["convergence"] = (
+            "converged"
+            if delta_wl <= tol_wl_um and delta_a <= tol_A
+            and delta_width is not None and delta_width <= tol_fwhm_nm
+            else "partial"
+        )
+        result.append(entry)
+    return result, next_branch_index
 
 
 def _estimate_fwhm(
