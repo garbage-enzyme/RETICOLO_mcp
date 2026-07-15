@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import LEASE_PATH, RUNTIME_DIR
+from .durable_io import atomic_write_bytes, unlink_with_retry
 
 LEASE_SCHEMA = "1"
 COMSOL_LEASE_NAME = "solver_owner.json"
@@ -242,10 +243,7 @@ def lease_acquire(label: str = "interactive", mode: str = "memory") -> dict[str,
             "mode": mode,
         }
 
-        tmp = LEASE_PATH.with_name(
-            f".{LEASE_PATH.name}.{pid}.{token[:8]}.tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        os.replace(tmp, LEASE_PATH)
+        _write_lease(data)
 
         return {"acquired": True, "token": token,
                 "lease_path": str(LEASE_PATH), "pid": pid}
@@ -267,10 +265,7 @@ def lease_heartbeat(token: str) -> bool:
     data = dict(our)
     data["heartbeat"] = time.time()
 
-    tmp = LEASE_PATH.with_name(
-        f".{LEASE_PATH.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, LEASE_PATH)
+    _write_lease(data)
     return True
 
 
@@ -283,5 +278,23 @@ def lease_release(token: str | None = None) -> dict[str, Any]:
         return {"released": False, "detail": "lease owned by another process"}
     if token is not None and our.get("token") != token:
         return {"released": False, "detail": "lease token mismatch"}
-    LEASE_PATH.unlink(missing_ok=True)
+    expected_token = our.get("token")
+    unlink_with_retry(
+        LEASE_PATH, missing_ok=True,
+        validate_owner=lambda: _lease_matches(os.getpid(), expected_token),
+    )
     return {"released": True}
+
+
+def _write_lease(data: dict[str, Any]) -> None:
+    payload = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    atomic_write_bytes(LEASE_PATH, payload)
+
+
+def _lease_matches(pid: int, token: str) -> bool:
+    inspection = _inspect_lease(LEASE_PATH)
+    data = inspection.get("data") or {}
+    return (
+        inspection["state"] in {"active", "stale_live"}
+        and data.get("pid") == pid and data.get("token") == token
+    )

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import RUNTIME_DIR
+from .durable_io import atomic_write_bytes
 
 SCHEMA_VERSION = "1"
 MAX_SPEC_BYTES = 256 * 1024
@@ -27,17 +28,8 @@ _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON via a flushed temporary file and atomic replacement."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
-    try:
-        payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
-        with open(tmp, "x", encoding="utf-8", newline="\n") as f:
-            f.write(payload)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+    payload = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    atomic_write_bytes(path, payload)
 
 
 def _validate_job_id(job_id: str) -> str:
