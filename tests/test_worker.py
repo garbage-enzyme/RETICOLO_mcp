@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from reticolo_mcp.worker import _to_complex
+from reticolo_mcp.worker import _cancel_requested, _to_complex
 
 
 class TestToComplex:
@@ -57,3 +57,23 @@ class TestToComplex:
     def test_plain_numbers_passthrough(self):
         result = _to_complex([1.0, 1.5, 1.0])
         assert result == [1.0, 1.5, 1.0]
+
+
+class TestCancelControl:
+    def test_cancel_requested_state(self, monkeypatch):
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {"status": "cancel_requested"},
+        )
+        assert _cancel_requested("job-abc") is True
+
+    def test_running_state(self, monkeypatch):
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {"status": "running"},
+        )
+        assert _cancel_requested("job-abc") is False
+
+    def test_missing_state(self, monkeypatch):
+        monkeypatch.setattr("reticolo_mcp.worker.read_state", lambda _job_id: None)
+        assert _cancel_requested("job-abc") is False

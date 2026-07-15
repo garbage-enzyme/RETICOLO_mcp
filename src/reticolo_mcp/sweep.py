@@ -13,7 +13,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 def run_sweep(
@@ -29,6 +29,7 @@ def run_sweep(
     config_hash: str = "",
     csv_path: str | Path,
     resume: bool = True,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run a wavelength sweep with per-row CSV persistence.
 
@@ -65,6 +66,14 @@ def run_sweep(
                 "errors": 0, "csv_path": str(csv_path), "runtime_s": 0,
                 "config_hash": config_hash, "status": "all_skipped"}
 
+    if _cancel_requested(should_cancel):
+        return {
+            "total": len(wls_um), "solved": 0, "skipped": len(skipped),
+            "errors": 0, "csv_path": str(csv_path), "runtime_s": 0,
+            "config_hash": config_hash, "status": "cancel_requested",
+            "cancel_observed": True,
+        }
+
     file_exists = csv_path.exists()
 
     if file_exists and config_hash:
@@ -92,6 +101,8 @@ def run_sweep(
             ])
 
         for wl in pending:
+            if _cancel_requested(should_cancel):
+                break
             row_time = time.time()
             result = engine.solve_point(
                 wl_um=wl, D=D_list, nn=nn,
@@ -123,6 +134,11 @@ def run_sweep(
             else:
                 errors += 1
 
+            if _cancel_requested(should_cancel):
+                break
+
+    cancel_observed = _cancel_requested(should_cancel)
+
     return {
         "total": len(wls_um),
         "solved": solved,
@@ -131,8 +147,23 @@ def run_sweep(
         "csv_path": str(csv_path),
         "runtime_s": round(time.time() - t0, 1),
         "config_hash": config_hash,
-        "status": "completed" if errors == 0 else "completed_with_errors",
+        "status": (
+            "cancel_requested" if cancel_observed
+            else "completed" if errors == 0
+            else "completed_with_errors"
+        ),
+        "cancel_observed": cancel_observed,
     }
+
+
+def _cancel_requested(callback: Callable[[], bool] | None) -> bool:
+    """Poll a cooperative control callback and fail closed on callback errors."""
+    if callback is None:
+        return False
+    try:
+        return bool(callback())
+    except Exception:
+        return True
 
 
 # ------------------------------------------------------------------

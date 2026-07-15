@@ -139,10 +139,34 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             config_hash=spec.get("config_hash", ""),
             csv_path=csv,
             resume=True,
+            should_cancel=lambda: _cancel_requested(job_id),
         )
 
+        if result.get("cancel_observed"):
+            write_state(job_id, {
+                "status": "interrupted",
+                "worker_pid": os.getpid(),
+                "interrupted_at": time.time(),
+                "reason": "cooperative_cancel_boundary",
+                "solved": result["solved"],
+                "skipped": result["skipped"],
+                "errors": result["errors"],
+                "runtime_s": result["runtime_s"],
+            })
+            append_event(job_id, {
+                "event": "cancel_observed_at_safe_boundary",
+                "solved": result["solved"],
+                "skipped": result["skipped"],
+                "errors": result["errors"],
+            })
+            _log(job_id, "cancellation observed at a safe point boundary")
+            return 0
+
         write_state(job_id, {
-            "status": "completed",
+            "status": (
+                "completed" if result["errors"] == 0
+                else "completed_with_errors"
+            ),
             "worker_pid": os.getpid(),
             "completed_at": time.time(),
             "solved": result["solved"],
@@ -180,6 +204,12 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
         lease_release()
         append_event(job_id, {"event": "worker_exited"})
         _log(job_id, "worker exited")
+
+
+def _cancel_requested(job_id: str) -> bool:
+    """Return True only for the active job's durable cancel request."""
+    state = read_state(job_id)
+    return bool(state and state.get("status") in {"cancel_requested", "cancelling"})
 
 
 def _setup_logging(job_id: str) -> None:

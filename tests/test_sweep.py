@@ -56,6 +56,56 @@ class TestReadCompleted:
 
 
 class TestRunSweep:
+    def test_cancel_before_first_point(self, tmp_path):
+        engine = MagicMock()
+        csv_path = tmp_path / "sweep.csv"
+        r = run_sweep(
+            engine, wls_um=[5.0], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_id="cancel-before", csv_path=str(csv_path),
+            should_cancel=lambda: True,
+        )
+        assert r["status"] == "cancel_requested"
+        assert r["cancel_observed"] is True
+        assert r["solved"] == 0
+        engine.solve_point.assert_not_called()
+
+    def test_cancel_after_persisted_point(self, tmp_path):
+        engine = MagicMock()
+        engine.solve_point.side_effect = [_ok_result(5.0), _ok_result(5.1)]
+        csv_path = tmp_path / "sweep.csv"
+
+        r = run_sweep(
+            engine, wls_um=[5.0, 5.1], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_id="cancel-after", csv_path=str(csv_path),
+            should_cancel=lambda: engine.solve_point.call_count >= 1,
+        )
+
+        assert r["status"] == "cancel_requested"
+        assert r["cancel_observed"] is True
+        assert r["solved"] == 1
+        assert engine.solve_point.call_count == 1
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) == 1
+        assert rows[0]["status"] == "ok"
+
+    def test_cancel_callback_error_fails_closed(self, tmp_path):
+        engine = MagicMock()
+
+        def broken_control():
+            raise RuntimeError("control unavailable")
+
+        r = run_sweep(
+            engine, wls_um=[5.0], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            config_id="cancel-error", csv_path=str(tmp_path / "sweep.csv"),
+            should_cancel=broken_control,
+        )
+        assert r["status"] == "cancel_requested"
+        engine.solve_point.assert_not_called()
+
     def test_all_skipped(self, tmp_path):
         engine = MagicMock()
         csv = tmp_path / "sweep.csv"
