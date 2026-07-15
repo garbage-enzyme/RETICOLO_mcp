@@ -420,12 +420,14 @@ def job_submit(
         "event": "job_submitted", "attempt": 1, "attempt_id": attempt_id,
     })
 
-    worker_pid = _spawn_worker(job_id)
+    launch = _launch_worker(job_id, attempt_id)
+    if launch["status"] != "ok":
+        return launch
 
     return {"status": "ok", "job_id": job_id,
             "config_hash": spec["config_hash"],
             "total_points": len(wls_um), "attempt_id": attempt_id,
-            "launcher_pid": worker_pid,
+            "launcher_pid": launch["launcher_pid"],
             "resource_decision_hash": decision["decision_hash"]}
 
 
@@ -526,12 +528,44 @@ def job_resume(job_id: str) -> dict:
         "attempt_id": attempt_id,
     })
 
-    worker_pid = _spawn_worker(job_id)
+    launch = _launch_worker(job_id, attempt_id)
+    if launch["status"] != "ok":
+        return launch
     return {
         "status": "ok", "job_id": job_id, "resumed": True,
         "attempt": attempt, "attempt_id": attempt_id,
-        "launcher_pid": worker_pid,
+        "launcher_pid": launch["launcher_pid"],
     }
+
+
+def _launch_worker(job_id: str, attempt_id: str) -> dict:
+    """Launch a worker or durably fail the exact submitted attempt."""
+    try:
+        return {"status": "ok", "launcher_pid": _spawn_worker(job_id)}
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"[:500]
+        transition = jobs.transition_state(
+            job_id,
+            allowed_from={"submitted"},
+            attempt_id=attempt_id,
+            updates={"status": "failed", "error": f"worker spawn: {detail}"},
+        )
+        try:
+            jobs.append_event(job_id, {
+                "event": "worker_spawn_failed",
+                "attempt_id": attempt_id,
+                "detail": detail,
+                "state_updated": bool(transition.get("updated")),
+            })
+        except Exception:
+            pass
+        return {
+            "status": "error",
+            "error_code": "worker_spawn_failed",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "detail": detail,
+        }
 
 
 def _spawn_worker(job_id: str) -> int:

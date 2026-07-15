@@ -228,6 +228,51 @@ class TestPublicJobControls:
         assert state["attempt"] == 1
         assert state["attempt_id"] == result["attempt_id"]
 
+    def test_submit_spawn_failure_is_durable(self, monkeypatch):
+        monkeypatch.setattr(
+            server, "sample_resources", lambda **_kwargs: self._green_snapshot(),
+        )
+        monkeypatch.setattr(
+            server, "_spawn_worker",
+            lambda _job_id: (_ for _ in ()).throw(OSError("cannot spawn")),
+        )
+        result = server.job_submit(
+            wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            resource_policy=self._resource_policy(),
+        )
+        assert result["error_code"] == "worker_spawn_failed"
+        state = server.jobs.read_state(result["job_id"])
+        assert state["status"] == "failed"
+        assert state["attempt_id"] == result["attempt_id"]
+        events = server.jobs.read_events(result["job_id"])
+        assert events[-1]["event"] == "worker_spawn_failed"
+
+    def test_resume_spawn_failure_fails_new_attempt(self, monkeypatch):
+        monkeypatch.setattr(
+            server, "sample_resources", lambda **_kwargs: self._green_snapshot(),
+        )
+        monkeypatch.setattr(server, "_spawn_worker", lambda _job_id: 4321)
+        submitted = server.job_submit(
+            wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            resource_policy=self._resource_policy(),
+        )
+        server.jobs.write_state(submitted["job_id"], {
+            "status": "failed", "attempt": 1,
+            "attempt_id": submitted["attempt_id"],
+        })
+        monkeypatch.setattr(
+            server, "_spawn_worker",
+            lambda _job_id: (_ for _ in ()).throw(OSError("cannot respawn")),
+        )
+        result = server.job_resume(submitted["job_id"])
+        assert result["error_code"] == "worker_spawn_failed"
+        state = server.jobs.read_state(submitted["job_id"])
+        assert state["status"] == "failed"
+        assert state["attempt"] == 2
+        assert state["attempt_id"] == result["attempt_id"]
+
     def test_submit_requires_resource_policy(self, monkeypatch):
         spawn = MagicMock()
         monkeypatch.setattr(server, "_spawn_worker", spawn)
