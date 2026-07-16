@@ -18,12 +18,16 @@ from mcp.server.fastmcp import FastMCP
 
 from . import __version__
 from .config import (
+    ARTIFACT_ROOT,
     EXPERIMENTAL_ENABLED,
+    MATLAB_TEMP_DIR,
     MAX_CONFIG_ID_LEN,
     MAX_FOURIER_ORDER,
     MAX_JOB_POINTS,
     MAX_TEXTURES,
     RETICOLO_DIR,
+    RETICOLO_SCRATCH_DIR,
+    RUNTIME_DIR,
 )
 from .engine import REticoloEngine
 from .lease import lease_status as _lease_status
@@ -602,19 +606,56 @@ def _launch_worker(job_id: str, attempt_id: str) -> dict:
 
 
 def _spawn_worker(job_id: str) -> int:
-    """Launch one hidden detached worker and return the launcher PID."""
+    """Launch one detached worker and return its PID."""
     worker_script = str(Path(__file__).resolve().parent / "worker.py")
     env = os.environ.copy()
     src_dir = str(Path(__file__).resolve().parent.parent)
     existing_path = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_path}" if existing_path else src_dir
+    env["RETICOLO_MCP_DIR"] = str(RETICOLO_DIR)
+    env["RETICOLO_RUNTIME_DIR"] = str(RUNTIME_DIR)
+    env["RETICOLO_SCRATCH_DIR"] = str(RETICOLO_SCRATCH_DIR)
+    env["RETICOLO_MATLAB_TEMP"] = str(MATLAB_TEMP_DIR)
+    env["RETICOLO_ARTIFACT_DIR"] = str(ARTIFACT_ROOT)
+    command = [sys.executable, worker_script, job_id]
+    if sys.platform == "win32":
+        return _spawn_worker_via_wmi(command, env, RUNTIME_DIR)
     proc = subprocess.Popen(
-        [sys.executable, worker_script, job_id],
+        command,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env=env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return int(proc.pid)
+
+
+def _spawn_worker_via_wmi(
+    command: list[str], env: dict[str, str], cwd: Path,
+    *, client=None,
+) -> int:
+    """Create a hidden Windows worker outside the stdio host's Job Object."""
+    if client is None:
+        import win32com.client as client
+
+    service = client.GetObject(
+        r"winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2"
+    )
+    process = service.Get("Win32_Process")
+    startup = service.Get("Win32_ProcessStartup").SpawnInstance_()
+    startup.ShowWindow = 0
+    startup.EnvironmentVariables = tuple(
+        f"{key}={value}" for key, value in sorted(env.items())
+    )
+    inputs = process.Methods_("Create").InParameters.SpawnInstance_()
+    inputs.CommandLine = subprocess.list2cmdline(command)
+    inputs.CurrentDirectory = str(cwd)
+    inputs.ProcessStartupInformation = startup
+    output = process.ExecMethod_("Create", inputs)
+    return_value = int(output.ReturnValue)
+    process_id = output.ProcessId
+    if return_value != 0 or process_id is None:
+        raise OSError(f"Win32_Process.Create failed with code {return_value}")
+    return int(process_id)
 
 
 @mcp.tool()

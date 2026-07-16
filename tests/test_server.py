@@ -327,9 +327,61 @@ class TestPublicJobControls:
         assert result["error_code"] == "resource_warning_confirmation_required"
         assert len(result["resource_decision"]["decision_hash"]) == 64
 
-    def test_spawn_worker_uses_hidden_window_flag(self, monkeypatch):
+    def test_spawn_worker_uses_wmi_breakaway_on_windows(self, monkeypatch):
+        launch = MagicMock(return_value=9876)
+        popen = MagicMock()
+        monkeypatch.setattr(server.sys, "platform", "win32")
+        monkeypatch.setattr(server, "_spawn_worker_via_wmi", launch)
+        monkeypatch.setattr(server.subprocess, "Popen", popen)
+        assert server._spawn_worker("job-abc") == 9876
+        launch.assert_called_once()
+        command, env, cwd = launch.call_args.args
+        assert command[-1] == "job-abc"
+        assert env["RETICOLO_MCP_DIR"] == str(server.RETICOLO_DIR)
+        assert env["RETICOLO_RUNTIME_DIR"] == str(server.RUNTIME_DIR)
+        assert cwd == server.RUNTIME_DIR
+        popen.assert_not_called()
+
+    def test_wmi_launch_is_hidden_and_checks_return_code(self):
+        client = MagicMock()
+        service = client.GetObject.return_value
+        process = MagicMock()
+        startup_class = MagicMock()
+        service.Get.side_effect = lambda name: {
+            "Win32_Process": process,
+            "Win32_ProcessStartup": startup_class,
+        }[name]
+        startup = startup_class.SpawnInstance_.return_value
+        inputs = process.Methods_.return_value.InParameters.SpawnInstance_.return_value
+        output = process.ExecMethod_.return_value
+        output.ReturnValue = 0
+        output.ProcessId = 9876
+
+        pid = server._spawn_worker_via_wmi(
+            ["python.exe", "worker.py", "job-abc"],
+            {"B": "2", "A": "1"}, server.RUNTIME_DIR, client=client,
+        )
+
+        assert pid == 9876
+        assert startup.ShowWindow == 0
+        assert startup.EnvironmentVariables == ("A=1", "B=2")
+        assert inputs.CommandLine == "python.exe worker.py job-abc"
+        assert inputs.CurrentDirectory == str(server.RUNTIME_DIR)
+        assert inputs.ProcessStartupInformation is startup
+        process.ExecMethod_.assert_called_once_with("Create", inputs)
+
+        output.ReturnValue = 21
+        output.ProcessId = None
+        with pytest.raises(OSError, match="code 21"):
+            server._spawn_worker_via_wmi(
+                ["python.exe", "worker.py", "job-abc"],
+                {}, server.RUNTIME_DIR, client=client,
+            )
+
+    def test_spawn_worker_non_windows_keeps_hidden_subprocess(self, monkeypatch):
         popen = MagicMock()
         popen.return_value.pid = 9876
+        monkeypatch.setattr(server.sys, "platform", "linux")
         monkeypatch.setattr(server.subprocess, "Popen", popen)
         monkeypatch.setattr(server.subprocess, "CREATE_NO_WINDOW", 0x08000000)
         assert server._spawn_worker("job-abc") == 9876
