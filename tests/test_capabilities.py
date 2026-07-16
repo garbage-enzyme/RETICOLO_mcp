@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from reticolo_mcp.capabilities import capability_receipt
+from reticolo_mcp.capabilities import _source_identity, capability_receipt
 from reticolo_mcp.server import reticolo_capabilities
 
 
@@ -31,3 +32,13 @@ def test_field_and_convergence_are_not_marked_verified():
     receipt = reticolo_capabilities()
     assert receipt["tool_maturity"]["reticolo_field_export"].startswith("unavailable")
     assert receipt["tool_maturity"]["reticolo_convergence"].startswith("experimental")
+
+
+def test_source_identity_is_stable_across_checkout_line_endings(tmp_path: Path):
+    lf = tmp_path / "lf"
+    crlf = tmp_path / "crlf"
+    lf.mkdir()
+    crlf.mkdir()
+    (lf / "a.py").write_bytes(b"value = 1\n")
+    (crlf / "a.py").write_bytes(b"value = 1\r\n")
+    assert _source_identity(lf) == _source_identity(crlf)

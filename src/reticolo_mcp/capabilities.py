@@ -66,13 +66,14 @@ def _deployment_classification() -> str:
     return "source_tree" if (repo_root / "pyproject.toml").is_file() else "installed_site_package"
 
 
-def _source_identity() -> str:
-    """Hash package-relative Python source names and bytes."""
-    package_dir = Path(__file__).resolve().parent
+def _source_identity(package_dir: Path | None = None) -> str:
+    """Hash canonical package-relative Python names and LF-normalized bytes."""
+    package_dir = package_dir or Path(__file__).resolve().parent
     digest = hashlib.sha256()
     for path in sorted(package_dir.glob("*.py"), key=lambda p: p.name):
         digest.update(path.name.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        source = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        digest.update(source)
         digest.update(b"\0")
     return digest.hexdigest()
