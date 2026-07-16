@@ -34,12 +34,16 @@ python -m reticolo_mcp.server
   "reticolo": {
     "type": "local",
     "command": ["D:\\condaenvs\\reticolo-mcp\\python.exe", "-m", "reticolo_mcp.server"],
+    "cwd": "D:\\reticolo_runtime",
     "environment": { "RETICOLO_MCP_DIR": "D:\\RETICOLO V10\\V10_2025\\reticolo_allege_v10" },
     "enabled": true,
     "timeout": 120000
   }
 }
 ```
+
+Use an ASCII-only `cwd` outside the checkout. A source-tree `cwd` can shadow the
+non-editable installation and makes the deployment receipt report `source_tree`.
 
 ## Tools
 
@@ -70,6 +74,26 @@ Durable `job_submit` requires an explicit resource policy. A warning decision mu
 resubmitted with the returned `decision_hash`; a refusal never launches a worker.
 
 ## Verification
+
+After a non-editable install, verify the actual stdio transport from an ASCII
+directory outside the checkout. Supply identities from the reviewed build receipt:
+
+```powershell
+python scripts\verify_installed_transport.py `
+  --python "D:\condaenvs\reticolo-mcp\python.exe" `
+  --cwd "D:\reticolo_runtime" `
+  --reticolo-dir "D:\RETICOLO V10\V10_2025\reticolo_allege_v10" `
+  --expected-version "<version>" `
+  --expected-tool-count <count> `
+  --expected-build-id "<build-sha256>" `
+  --expected-schema-id "<schema-sha256>" `
+  --output "D:\reticolo_runtime\installed_stdio_receipt.json"
+```
+
+The gate performs MCP initialization, tool discovery, and a capability call in a
+fresh child process. It fails if the installed identity/profile differs, MATLAB is
+imported during discovery, or the MATLAB PID set changes. Use `--experimental` only
+for a separately declared restart-bound profile check, then restart without it.
 
 | Gate | Evidence |
 |---|---|

@@ -35,12 +35,16 @@ python -m reticolo_mcp.server
   "reticolo": {
     "type": "local",
     "command": ["D:\\condaenvs\\reticolo-mcp\\python.exe", "-m", "reticolo_mcp.server"],
+    "cwd": "D:\\reticolo_runtime",
     "environment": { "RETICOLO_MCP_DIR": "D:\\RETICOLO V10\\V10_2025\\reticolo_allege_v10" },
     "enabled": true,
     "timeout": 120000
   }
 }
 ```
+
+`cwd` 必须是源码仓库外的纯 ASCII 路径。若从源码树启动，源码会遮蔽 non-editable
+安装，部署 receipt 将报告 `source_tree`，不能作为 installed-package 验收。
 
 ## 工具
 
@@ -70,6 +74,26 @@ python -m reticolo_mcp.server
 `decision_hash` 再次确认；refuse 结果不会启动 worker。
 
 ## 验证
+
+non-editable 安装后，从源码仓库外的纯 ASCII 目录验证真实 stdio transport。以下
+身份值应来自已审查的构建 receipt：
+
+```powershell
+python scripts\verify_installed_transport.py `
+  --python "D:\condaenvs\reticolo-mcp\python.exe" `
+  --cwd "D:\reticolo_runtime" `
+  --reticolo-dir "D:\RETICOLO V10\V10_2025\reticolo_allege_v10" `
+  --expected-version "<version>" `
+  --expected-tool-count <count> `
+  --expected-build-id "<build-sha256>" `
+  --expected-schema-id "<schema-sha256>" `
+  --output "D:\reticolo_runtime\installed_stdio_receipt.json"
+```
+
+该门禁会在全新子进程中完成 MCP 初始化、工具发现和 capability 调用。若 installed
+身份/profile 不一致、发现阶段导入 MATLAB，或 MATLAB PID 集合发生变化，门禁会失败。
+`--experimental` 仅用于单独声明的 restart-bound profile 检查；随后必须不带该参数
+再次重启并验证默认 profile。
 
 | 阶段 | 证据 |
 |---|---|
