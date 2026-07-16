@@ -266,6 +266,11 @@ class TestEngineLifecycle:
         assert eng._lease_token == "owned-token"
         release.assert_not_called()
 
+    def test_process_exit_wait_covers_slow_windows_shutdown(self):
+        from reticolo_mcp.engine import PROCESS_EXIT_WAIT_S
+
+        assert PROCESS_EXIT_WAIT_S >= 30.0
+
     def test_process_inventory_parses_pid_and_creation_date(self):
         from reticolo_mcp.engine import _matlab_process_inventory
         completed = MagicMock(

@@ -52,7 +52,10 @@ from .lease import (
     _process_creation_date,
 )
 
-PROCESS_EXIT_WAIT_S = 5.0
+# MATLAB R2025b can keep MATLAB.exe alive for more than five seconds after
+# Engine.quit() returns on Windows. Keep cleanup bounded, but allow the observed
+# asynchronous shutdown to finish before retaining fail-closed ownership evidence.
+PROCESS_EXIT_WAIT_S = 30.0
 
 
 def _ensure_matlab() -> Any:
