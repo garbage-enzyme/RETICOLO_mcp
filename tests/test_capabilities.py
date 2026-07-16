@@ -34,6 +34,12 @@ def test_field_and_convergence_are_not_marked_verified():
     assert receipt["tool_maturity"]["reticolo_convergence"].startswith("experimental")
 
 
+def test_lifecycle_tools_are_promoted_after_real_receipts():
+    receipt = reticolo_capabilities()
+    assert receipt["tool_maturity"]["reticolo_start"] == "verified_real_lifecycle"
+    assert receipt["tool_maturity"]["reticolo_stop"] == "verified_real_lifecycle"
+
+
 def test_source_identity_is_stable_across_checkout_line_endings(tmp_path: Path):
     lf = tmp_path / "lf"
     crlf = tmp_path / "crlf"

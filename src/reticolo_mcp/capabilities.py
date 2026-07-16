@@ -18,8 +18,8 @@ TOOL_MATURITY = {
     "reticolo_resource_preflight": "verified_solver_free",
     "solver_status": "verified_read_only",
     "reticolo_status": "verified_read_only",
-    "reticolo_start": "real_reverification_required",
-    "reticolo_stop": "real_reverification_required",
+    "reticolo_start": "verified_real_lifecycle",
+    "reticolo_stop": "verified_real_lifecycle",
     "reticolo_solve_point": "verified_te_fixture_only",
     "reticolo_sweep": "experimental",
     "job_submit": "experimental",
@@ -55,7 +55,7 @@ def capability_receipt(tool_names: Iterable[str]) -> dict[str, Any]:
             "TM channel mapping is not release accepted",
             "convergence is experimental and not branch-convergence accepted",
             "RETICOLO V10 field export fails on the current retchamp fixture",
-            "real lifecycle and long-heartbeat gates remain pending after v2 changes",
+            "real TE/lossy/patterned physics fixtures remain pending after v2 changes",
         ],
     }
 

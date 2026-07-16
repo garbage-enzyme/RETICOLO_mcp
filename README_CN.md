@@ -53,7 +53,7 @@ python -m reticolo_mcp.server
 | `reticolo_capabilities` | 已验证（无需求解器） | 工具成熟度、schema 与构建身份 |
 | `solver_status` | 已验证（只读） | 租约状态 + COMSOL 碰撞检测 |
 | `reticolo_status` | 已验证（只读） | 引擎句柄与租约状态 |
-| `reticolo_start` / `reticolo_stop` | 需要重新实测 | v0.2 开发中生命周期已修改 |
+| `reticolo_start` / `reticolo_stop` | 已通过真实生命周期验收 | 三轮清理、启动回滚与 >90 s heartbeat ownership 均通过 |
 | `reticolo_solve_point` | 仅 TE 基准 | 单波长原始 R/T 与派生 A_balance |
 | `reticolo_sweep` | 实验性、默认禁用 | 旧同步扫描；优先使用持久化 job |
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实重启验收尚未执行 |
@@ -104,6 +104,8 @@ python scripts\verify_installed_transport.py `
 | 历史单元测试基准 | v0.2 开发修改前 133 passed |
 | M3 — 高阶冒烟 | nn=21（32s）+ nn=31（261s），内存模式稳定，无 OOM |
 | M4 — Scratch 模式 | 求解正确，结果与内存模式一致 |
+| V2 真实生命周期 | 3/3 循环与启动后 rollback 通过；无 MATLAB/lease/scratch 残留 |
+| V2 长 heartbeat | 阻塞 100.016 s；约 30/60/90 s 持续更新；95 s contender 被拒绝 |
 
 ## 已知限制
 
