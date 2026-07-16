@@ -53,7 +53,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `solver_status` | Verified read-only | Lease state + COMSOL collision check |
 | `reticolo_status` | Verified read-only | Engine handle + lease status |
 | `reticolo_start` / `reticolo_stop` | Verified real lifecycle | Three clean cycles, rollback, and >90 s heartbeat ownership passed |
-| `reticolo_solve_point` | TE fixture only | One wavelength to raw R/T and derived A_balance |
+| `reticolo_solve_point` | Verified TE analytical + lossy slab | One wavelength to raw R/T and derived A_balance |
 | `reticolo_sweep` | Experimental, disabled by default | Legacy synchronous sweep; prefer durable jobs |
 | `job_submit/status/tail/cancel/resume` | Experimental | Durable controls; real restart gate pending |
 | `reticolo_convergence` | Experimental | Not accepted as branch-aware convergence evidence |
@@ -106,6 +106,8 @@ for a separately declared restart-bound profile check, then restart without it.
 | M4 — Scratch mode | solves correctly, matches memory-mode results |
 | V2 real lifecycle | 3/3 cycles + post-start rollback passed; no MATLAB/lease/scratch residue |
 | V2 long heartbeat | 100.016 s blocking call; heartbeats at ~30/60/90 s; 95 s contender refused |
+| V2 TE analytical slab | raw R/T/A_balance = 0.1479289941 / 0.8520710059 / 2.22e-16; analytical errors < 2e-16 |
+| V2 lossy slab | raw R/T/A_balance = 0.0030686604 / 0.8847234795 / 0.1122078601; analytical errors < 3e-16 |
 
 ## Known limitations
 

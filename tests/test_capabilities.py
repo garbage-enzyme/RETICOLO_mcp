@@ -40,6 +40,14 @@ def test_lifecycle_tools_are_promoted_after_real_receipts():
     assert receipt["tool_maturity"]["reticolo_stop"] == "verified_real_lifecycle"
 
 
+def test_one_point_reports_exact_verified_fixture_scope():
+    receipt = reticolo_capabilities()
+    assert (
+        receipt["tool_maturity"]["reticolo_solve_point"]
+        == "verified_te_analytical_and_lossy_slab"
+    )
+
+
 def test_source_identity_is_stable_across_checkout_line_endings(tmp_path: Path):
     lf = tmp_path / "lf"
     crlf = tmp_path / "crlf"
