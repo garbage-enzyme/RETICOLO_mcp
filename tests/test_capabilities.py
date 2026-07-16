@@ -40,6 +40,14 @@ def test_lifecycle_tools_are_promoted_after_real_receipts():
     assert receipt["tool_maturity"]["reticolo_stop"] == "verified_real_lifecycle"
 
 
+def test_resource_preflight_includes_staged_real_gate():
+    receipt = reticolo_capabilities()
+    assert (
+        receipt["tool_maturity"]["reticolo_resource_preflight"]
+        == "verified_solver_free_and_staged_real"
+    )
+
+
 def test_one_point_reports_exact_verified_fixture_scope():
     receipt = reticolo_capabilities()
     assert (

@@ -50,6 +50,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | Tool | Status | Description |
 |---|---|---|
 | `reticolo_capabilities` | Verified solver-free | Tool maturity, schemas, build identity |
+| `reticolo_resource_preflight` | Verified solver-free + staged real | Hashed admission plus nn=9/15/21/31 real gate |
 | `solver_status` | Verified read-only | Lease state + COMSOL collision check |
 | `reticolo_status` | Verified read-only | Engine handle + lease status |
 | `reticolo_start` / `reticolo_stop` | Verified real lifecycle | Three clean cycles, rollback, and >90 s heartbeat ownership passed |
@@ -113,6 +114,7 @@ for a separately declared restart-bound profile check, then restart without it.
 | V2 TE analytical slab | raw R/T/A_balance = 0.1479289941 / 0.8520710059 / 2.22e-16; analytical errors < 2e-16 |
 | V2 lossy slab | raw R/T/A_balance = 0.0030686604 / 0.8847234795 / 0.1122078601; analytical errors < 3e-16 |
 | V2 patterned translation | Three direct/wrapper ledgers exact; Sun M5 raw R/T/A_balance = 0.8439529179 / 2.2009066e-6 / 0.1560448812 |
+| V2 staged resources | nn=9/15/21/31 all green and passive; solve times 0.936/5.616/28.800/227.452 s; exact lease retained |
 
 ## Known limitations
 
