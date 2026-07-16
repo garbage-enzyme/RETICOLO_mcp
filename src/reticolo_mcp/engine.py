@@ -56,6 +56,7 @@ from .lease import (
 # Engine.quit() returns on Windows. Keep cleanup bounded, but allow the observed
 # asynchronous shutdown to finish before retaining fail-closed ownership evidence.
 PROCESS_EXIT_WAIT_S = 30.0
+PASSIVITY_TOL = 1e-12
 
 
 def _ensure_matlab() -> Any:
@@ -531,7 +532,11 @@ class REticoloEngine:
                 }
             A_balance = 1.0 - R - T
             dt = round(time.time() - t0, 3)
-            passive = bool(0 <= R <= 1 and 0 <= T <= 1 and 0 <= A_balance <= 1)
+            passive = bool(
+                -PASSIVITY_TOL <= R <= 1 + PASSIVITY_TOL
+                and -PASSIVITY_TOL <= T <= 1 + PASSIVITY_TOL
+                and -PASSIVITY_TOL <= A_balance <= 1 + PASSIVITY_TOL
+            )
 
             return {
                 "status": "ok",
@@ -546,6 +551,11 @@ class REticoloEngine:
                 "T": T,
                 "A_balance": A_balance,
                 "passive": passive,
+                "passivity_policy": {
+                    "name": "bounded_rta_v1",
+                    "tolerance": PASSIVITY_TOL,
+                    "evidence_kind": "policy_outcome_not_independent_closure",
+                },
                 "solve_time_s": dt,
                 "config_id": config_id,
             }

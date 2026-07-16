@@ -437,6 +437,30 @@ class TestSolveValidation:
         assert result["theta_deg"] == -5.0
         assert result["azimuth_deg"] == 30.0
 
+    def test_passivity_policy_tolerates_roundoff_and_is_labeled(self):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        backend = MagicMock()
+        backend.workspace = {
+            "py_R": 0.14653257648954413,
+            "py_T": 0.853467423510456,
+        }
+        eng._engine = backend
+        with patch("reticolo_mcp.engine._ensure_matlab", return_value=MagicMock()):
+            result = eng.solve_point(
+                wl_um=1.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0, 1.5, 1.0],
+                profil={"heights": [0, 0.5, 0], "indices": [1, 2, 3]},
+                polarization=-1,
+            )
+        assert result["A_balance"] == pytest.approx(-1.1102230246251565e-16)
+        assert result["passive"] is True
+        assert result["passivity_policy"] == {
+            "name": "bounded_rta_v1",
+            "tolerance": 1e-12,
+            "evidence_kind": "policy_outcome_not_independent_closure",
+        }
+
     @pytest.mark.parametrize(
         ("kwargs", "error_code"),
         [
