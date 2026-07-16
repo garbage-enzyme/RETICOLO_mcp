@@ -20,7 +20,7 @@ TOOL_MATURITY = {
     "reticolo_status": "verified_read_only",
     "reticolo_start": "verified_real_lifecycle",
     "reticolo_stop": "verified_real_lifecycle",
-    "reticolo_solve_point": "verified_te_analytical_and_lossy_slab",
+    "reticolo_solve_point": "verified_te_one_point_translation",
     "reticolo_sweep": "experimental",
     "job_submit": "experimental",
     "job_status": "experimental",
@@ -55,7 +55,6 @@ def capability_receipt(tool_names: Iterable[str]) -> dict[str, Any]:
             "TM channel mapping is not release accepted",
             "convergence is experimental and not branch-convergence accepted",
             "RETICOLO V10 field export fails on the current retchamp fixture",
-            "real patterned-geometry translation fixtures remain pending after v2 changes",
         ],
     }
 

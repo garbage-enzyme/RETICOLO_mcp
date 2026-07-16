@@ -54,7 +54,7 @@ python -m reticolo_mcp.server
 | `solver_status` | 已验证（只读） | 租约状态 + COMSOL 碰撞检测 |
 | `reticolo_status` | 已验证（只读） | 引擎句柄与租约状态 |
 | `reticolo_start` / `reticolo_stop` | 已通过真实生命周期验收 | 三轮清理、启动回滚与 >90 s heartbeat ownership 均通过 |
-| `reticolo_solve_point` | 已验证 TE 解析与损耗平板 | 单波长原始 R/T 与派生 A_balance |
+| `reticolo_solve_point` | 已验证 TE 单点 translation | 均匀、损耗、矩形及多 curved inclusion fixtures |
 | `reticolo_sweep` | 实验性、默认禁用 | 旧同步扫描；优先使用持久化 job |
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实重启验收尚未执行 |
 | `reticolo_convergence` | 实验性 | 尚不能作为支路收敛证据 |
@@ -108,6 +108,7 @@ python scripts\verify_installed_transport.py `
 | V2 长 heartbeat | 阻塞 100.016 s；约 30/60/90 s 持续更新；95 s contender 被拒绝 |
 | V2 TE 解析平板 | raw R/T/A_balance = 0.1479289941 / 0.8520710059 / 2.22e-16；解析误差 < 2e-16 |
 | V2 损耗平板 | raw R/T/A_balance = 0.0030686604 / 0.8847234795 / 0.1122078601；解析误差 < 3e-16 |
+| V2 patterned translation | 三组 direct/wrapper ledger 全部 exact；Sun M5 raw R/T/A_balance = 0.8439529179 / 2.2009066e-6 / 0.1560448812 |
 
 ## 已知限制
 

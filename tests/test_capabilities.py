@@ -44,7 +44,7 @@ def test_one_point_reports_exact_verified_fixture_scope():
     receipt = reticolo_capabilities()
     assert (
         receipt["tool_maturity"]["reticolo_solve_point"]
-        == "verified_te_analytical_and_lossy_slab"
+        == "verified_te_one_point_translation"
     )
 
 
