@@ -547,13 +547,16 @@ def _textures_to_cell(eng: Any, matlab: Any, textures: list[Any]) -> Any:
     cell = eng.cell(1, len(textures))
     for i, tex in enumerate(textures):
         if isinstance(tex, (int, float, complex)):
-            cell[i] = complex(tex)
+            value = complex(tex)
+            cell[i] = value if value.imag != 0 else float(value.real)
         elif isinstance(tex, (list, tuple)):
             if tex and isinstance(tex[0], (int, float, complex)):
                 sub = eng.cell(1, len(tex))
                 for j, item in enumerate(tex):
                     if isinstance(item, (list, tuple)):
-                        has_complex = any(isinstance(x, complex) for x in item)
+                        has_complex = any(
+                            isinstance(x, complex) and x.imag != 0 for x in item
+                        )
                         if has_complex:
                             sub[j] = matlab.double(
                                 [complex(float(x.real), float(x.imag))
@@ -562,9 +565,13 @@ def _textures_to_cell(eng: Any, matlab: Any, textures: list[Any]) -> Any:
                                 is_complex=True,
                             )
                         else:
-                            sub[j] = matlab.double([float(x) for x in item])
+                            sub[j] = matlab.double([
+                                float(x.real) if isinstance(x, complex) else float(x)
+                                for x in item
+                            ])
                     else:
-                        sub[j] = complex(item)
+                        value = complex(item)
+                        sub[j] = value if value.imag != 0 else float(value.real)
                 cell[i] = sub
             else:
                 cell[i] = matlab.double([float(x) for x in tex])

@@ -454,10 +454,12 @@ class TestTexturesToCell:
         eng.cell.return_value = [None] * 2
         matlab = MagicMock()
 
-        _textures_to_cell(eng, matlab, [1.0, 1.5])
+        result = _textures_to_cell(eng, matlab, [1.0, 1.5])
         assert eng.cell.call_count == 1
         args = eng.cell.call_args[0]
         assert args[1] == 2
+        assert result == [1.0, 1.5]
+        assert all(type(value) is float for value in result)
 
     def test_patterned_layer(self):
         from reticolo_mcp.engine import _textures_to_cell
@@ -475,8 +477,34 @@ class TestTexturesToCell:
         eng.cell.return_value = [None]
         matlab = MagicMock()
 
-        _textures_to_cell(eng, matlab, [complex(4.0, 0.001)])
+        result = _textures_to_cell(eng, matlab, [complex(4.0, 0.001)])
         assert eng.cell.call_count == 1
+        assert result == [complex(4.0, 0.001)]
+
+    def test_zero_imaginary_scalar_stays_real(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.return_value = [None]
+        matlab = MagicMock()
+
+        result = _textures_to_cell(eng, matlab, [complex(1.0, 0.0)])
+        assert result == [1.0]
+        assert type(result[0]) is float
+
+    def test_zero_imaginary_inclusion_vector_stays_real(self):
+        from reticolo_mcp.engine import _textures_to_cell
+        eng = MagicMock()
+        eng.cell.side_effect = lambda r, c: [None] * c
+        matlab = MagicMock()
+        matlab.double.side_effect = lambda values, **kwargs: (values, kwargs)
+
+        result = _textures_to_cell(
+            eng, matlab,
+            [[complex(1.0, 0.0), [0.0, 0.0, 0.3, 0.2, complex(1.8, 0.0), 1]]],
+        )
+        assert result[0][0] == 1.0
+        assert type(result[0][0]) is float
+        assert result[0][1][1] == {}
 
     def test_empty_textures(self):
         from reticolo_mcp.engine import _textures_to_cell
