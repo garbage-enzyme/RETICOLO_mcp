@@ -53,7 +53,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `solver_status` | Verified read-only | Lease state + COMSOL collision check |
 | `reticolo_status` | Verified read-only | Engine handle + lease status |
 | `reticolo_start` / `reticolo_stop` | Verified real lifecycle | Three clean cycles, rollback, and >90 s heartbeat ownership passed |
-| `reticolo_solve_point` | Verified TE one-point translation | Uniform, lossy, rectangle, and curved multi-inclusion fixtures |
+| `reticolo_solve_point` | Verified TE/TM one-point translation | Normal and signed-angle analytical/direct fixtures plus patterned TE |
 | `reticolo_sweep` | Experimental, disabled by default | Legacy synchronous sweep; prefer durable jobs |
 | `job_submit/status/tail/cancel/resume` | Experimental | Durable controls; real restart gate pending |
 | `reticolo_convergence` | Experimental | Not accepted as branch-aware convergence evidence |
@@ -69,6 +69,10 @@ the flag does not promote these tools to verified status.
 
 Field artifacts, when experimental access is enabled, may only be written under
 `RETICOLO_ARTIFACT_DIR` (default: `<runtime>/artifacts`).
+
+One-point incidence uses signed `theta_deg` and degree-valued `azimuth_deg`. RETICOLO
+receives `ro=n_superstrate*sin(theta)`; nonzero angle requires a positive real uniform
+incident medium. Durable jobs currently remain normal-incidence only.
 
 Durable `job_submit` requires an explicit resource policy. A warning decision must be
 resubmitted with the returned `decision_hash`; a refusal never launches a worker.
@@ -112,9 +116,6 @@ for a separately declared restart-bound profile check, then restart without it.
 
 ## Known limitations
 
-- **TM at normal/off-normal incidence:** `pol=-1` gives R=T=0 for symmetric structures
-  due to RETICOLO V10 field-decomposition degeneracy. Use off-normal with `delta0≠0`
-  or investigate `ef.TMinc_top_*` channels.
 - **Field export (`retchamp`):** RETICOLO V10 `retapod`/`retchamp` crashes on uniform
   structures with an `imag(apod)` type error. This is an upstream V10 bug; field export
   is unverified until a workaround or V10 patch is available.

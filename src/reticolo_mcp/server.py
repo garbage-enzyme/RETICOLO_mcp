@@ -51,6 +51,8 @@ def _validate_solve_inputs(
     profil: dict,
     polarization: int,
     config_id: str,
+    theta_deg: float = 0.0,
+    azimuth_deg: float = 0.0,
 ) -> dict | None:
     """Return error dict if inputs fail validation, else None."""
     if isinstance(wl_um, bool) or not isinstance(wl_um, (int, float)):
@@ -95,12 +97,23 @@ def _validate_solve_inputs(
     if isinstance(polarization, bool) or not isinstance(polarization, int):
         return {"status": "error", "error_code": "invalid_polarization",
                 "detail": "polarization must be an integer"}
-    if polarization == -1:
-        return {"status": "error", "error_code": "unsupported_polarization",
-                "detail": "TM result-channel mapping is not release accepted"}
-    if polarization != 1:
+    if polarization not in (-1, 1):
         return {"status": "error", "error_code": "invalid_polarization",
-                "detail": "verified public polarization is currently 1 (TE)"}
+                "detail": "polarization must be 1 (TE) or -1 (TM)"}
+    if (
+        isinstance(theta_deg, bool)
+        or not isinstance(theta_deg, (int, float))
+        or not math.isfinite(float(theta_deg))
+        or not -90.0 < float(theta_deg) < 90.0
+    ):
+        return {"status": "error", "error_code": "invalid_theta"}
+    if (
+        isinstance(azimuth_deg, bool)
+        or not isinstance(azimuth_deg, (int, float))
+        or not math.isfinite(float(azimuth_deg))
+        or not -360.0 <= float(azimuth_deg) <= 360.0
+    ):
+        return {"status": "error", "error_code": "invalid_azimuth"}
     if not isinstance(config_id, str):
         return {"status": "error", "error_code": "invalid_config_id",
                 "detail": "config_id must be a string"}
@@ -140,6 +153,19 @@ def _validate_solve_inputs(
     ):
         return {"status": "error", "error_code": "invalid_profil",
                 "detail": "profile indices must reference 1-based textures"}
+    if float(theta_deg) != 0.0:
+        incident_texture = textures[indices[0] - 1]
+        if not isinstance(incident_texture, (int, float, complex)):
+            return {
+                "status": "error", "error_code": "unsupported_incident_medium",
+                "detail": "nonzero theta requires a uniform incident texture",
+            }
+        incident_value = complex(incident_texture)
+        if incident_value.imag != 0 or incident_value.real <= 0:
+            return {
+                "status": "error", "error_code": "unsupported_incident_medium",
+                "detail": "nonzero theta requires a positive real incident index",
+            }
     return None
 
 
@@ -207,6 +233,8 @@ def reticolo_solve_point(
     textures: list,
     profil: dict,
     polarization: int = 1,
+    theta_deg: float = 0.0,
+    azimuth_deg: float = 0.0,
     config_id: str = "",
 ) -> dict:
     """Solve a single wavelength point with RETICOLO RCWA.
@@ -219,6 +247,8 @@ def reticolo_solve_point(
                   or, for patterned layers, a list [bg_n, [cx,cy,dx,dy,n,k], ...].
         profil: {"heights": [z0, z1, ..., 0], "indices": [i0, i1, ...]}.
         polarization: 1 for TE, -1 for TM.
+        theta_deg: Signed incidence elevation in degrees (-90, 90).
+        azimuth_deg: Incidence-plane azimuth in degrees [-360, 360].
         config_id: Optional provenance tag (max 128 chars).
 
     Returns:
@@ -227,6 +257,7 @@ def reticolo_solve_point(
     err = _validate_solve_inputs(
         wl_um=wl_um, D=D, nn=nn, textures=textures, profil=profil,
         polarization=polarization, config_id=config_id,
+        theta_deg=theta_deg, azimuth_deg=azimuth_deg,
     )
     if err:
         return err
@@ -238,6 +269,8 @@ def reticolo_solve_point(
         textures=textures,
         profil=profil,
         polarization=int(polarization),
+        theta_deg=float(theta_deg),
+        azimuth_deg=float(azimuth_deg),
         config_id=config_id,
     )
 

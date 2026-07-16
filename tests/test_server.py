@@ -105,10 +105,40 @@ class TestValidateSolveInputs:
         assert err is not None
         assert err["error_code"] == "invalid_polarization"
 
-    def test_tm_is_explicitly_unsupported(self):
-        err = self._valid(polarization=-1)
-        assert err is not None
-        assert err["error_code"] == "unsupported_polarization"
+    def test_tm_is_accepted_after_real_channel_gate(self):
+        assert self._valid(polarization=-1) is None
+
+    @pytest.mark.parametrize(
+        ("overrides", "error_code"),
+        [
+            ({"theta_deg": 90.0}, "invalid_theta"),
+            ({"theta_deg": float("nan")}, "invalid_theta"),
+            ({"azimuth_deg": 361.0}, "invalid_azimuth"),
+            (
+                {
+                    "theta_deg": 5.0,
+                    "textures": [[1.0, [0, 0, 0.2, 0.2, 1.5, 1]], 1.0],
+                    "profil": {"heights": [0.1, 0], "indices": [1, 2]},
+                },
+                "unsupported_incident_medium",
+            ),
+        ],
+    )
+    def test_incidence_validation_fails_before_engine(self, overrides, error_code):
+        assert self._valid(**overrides)["error_code"] == error_code
+
+    def test_public_one_point_forwards_tm_and_angles(self, monkeypatch):
+        solve = MagicMock(return_value={"status": "ok"})
+        monkeypatch.setattr(server.engine, "solve_point", solve)
+        result = server.reticolo_solve_point(
+            wl_um=1.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0, 1.5, 1.0],
+            profil={"heights": [0, 0.5, 0], "indices": [1, 2, 3]},
+            polarization=-1, theta_deg=-5.0, azimuth_deg=30.0,
+        )
+        assert result == {"status": "ok"}
+        assert solve.call_args.kwargs["polarization"] == -1
+        assert solve.call_args.kwargs["theta_deg"] == -5.0
+        assert solve.call_args.kwargs["azimuth_deg"] == 30.0
 
     def test_config_id_too_long(self):
         from reticolo_mcp.config import MAX_CONFIG_ID_LEN

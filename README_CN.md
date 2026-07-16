@@ -54,7 +54,7 @@ python -m reticolo_mcp.server
 | `solver_status` | 已验证（只读） | 租约状态 + COMSOL 碰撞检测 |
 | `reticolo_status` | 已验证（只读） | 引擎句柄与租约状态 |
 | `reticolo_start` / `reticolo_stop` | 已通过真实生命周期验收 | 三轮清理、启动回滚与 >90 s heartbeat ownership 均通过 |
-| `reticolo_solve_point` | 已验证 TE 单点 translation | 均匀、损耗、矩形及多 curved inclusion fixtures |
+| `reticolo_solve_point` | 已验证 TE/TM 单点 translation | 正入射、signed-angle 解析/direct fixtures 与 patterned TE |
 | `reticolo_sweep` | 实验性、默认禁用 | 旧同步扫描；优先使用持久化 job |
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实重启验收尚未执行 |
 | `reticolo_convergence` | 实验性 | 尚不能作为支路收敛证据 |
@@ -69,6 +69,10 @@ python -m reticolo_mcp.server
 
 启用实验性场导出后，artifact 只能写入 `RETICOLO_ARTIFACT_DIR`（默认
 `<runtime>/artifacts`）及其子目录。
+
+单点入射使用 signed `theta_deg` 与以度为单位的 `azimuth_deg`。传给 RETICOLO 的
+参数为 `ro=n_superstrate*sin(theta)`；非零角要求正实数、均匀的入射介质。持久化 job
+当前仍仅支持正入射。
 
 持久化 `job_submit` 必须携带显式资源策略。warning 结果需要使用返回的
 `decision_hash` 再次确认；refuse 结果不会启动 worker。
@@ -112,8 +116,6 @@ python scripts\verify_installed_transport.py `
 
 ## 已知限制
 
-- **TM 正入射/偏入射：** `pol=-1` 对对称结构 R=T=0，由 RETICOLO V10 场分解退简并
-  引起。可使用 `delta0≠0` 或研究 `ef.TMinc_top_*` 通道。
 - **场导出（`retchamp`）：** RETICOLO V10 `retapod`/`retchamp` 在均匀结构上因
   `imag(apod)` 类型错误崩溃。此为 V10 上游 bug，在找到变通方案或 V10 修复前场导出
   未经验证。
