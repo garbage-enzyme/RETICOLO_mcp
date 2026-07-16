@@ -190,6 +190,61 @@ class TestFinalCleanup:
         assert transitions[0][1]["updates"]["status"] == "cleanup_uncertain"
         assert events[0]["event"] == "worker_cleanup_uncertain"
 
+    def test_cancelling_becomes_cancelled_only_after_proven_cleanup(self, monkeypatch):
+        stop_called = []
+
+        class Engine:
+            def stop(self):
+                stop_called.append(True)
+                return {"status": "stopped"}
+
+        state = {
+            "status": "cancelling", "attempt_id": "attempt-1", "attempt": 1,
+        }
+        events = []
+
+        def transition(_job_id, *, allowed_from, attempt_id, updates):
+            assert stop_called
+            assert state["status"] in allowed_from
+            assert state["attempt_id"] == attempt_id
+            state.update(updates)
+            return {"updated": True, "state": dict(state)}
+
+        monkeypatch.setattr("reticolo_mcp.worker.read_state", lambda _job_id: dict(state))
+        monkeypatch.setattr("reticolo_mcp.worker.transition_state", transition)
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.append_event",
+            lambda _job_id, event: events.append(event),
+        )
+        monkeypatch.setattr("reticolo_mcp.worker._log", lambda *_args: None)
+
+        assert _finalize_cleanup("job-abc", "attempt-1", Engine()) is True
+        assert state["status"] == "cancelled"
+        assert state["cleanup_proven"] is True
+        assert [event["event"] for event in events] == [
+            "cancelled_after_cleanup", "worker_exited",
+        ]
+
+    def test_failed_cancelled_transition_does_not_claim_worker_exit(self, monkeypatch):
+        engine = type("Engine", (), {"stop": lambda self: {"status": "stopped"}})()
+        events = []
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_state",
+            lambda _job_id: {"status": "cancelling", "attempt_id": "attempt-1"},
+        )
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.transition_state",
+            lambda *_args, **_kwargs: {"updated": False, "reason": "mutex_timeout"},
+        )
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.append_event",
+            lambda _job_id, event: events.append(event),
+        )
+        monkeypatch.setattr("reticolo_mcp.worker._log", lambda *_args: None)
+
+        assert _finalize_cleanup("job-abc", "attempt-1", engine) is False
+        assert events == []
+
     def test_async_exit_cleanup_is_retried_by_exact_worker(self, monkeypatch):
         results = iter([
             {

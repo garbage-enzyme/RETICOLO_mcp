@@ -158,7 +158,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 transition_state(
                     job_id, allowed_from={"cancel_requested", "cancelling"},
                     attempt_id=attempt_id,
-                    updates={"status": "interrupted",
+                    updates={"status": "cancelling",
                              "reason": "cancelled_during_engine_start"},
                 )
                 return 0
@@ -196,9 +196,9 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 allowed_from={"running", "cancel_requested", "cancelling"},
                 attempt_id=attempt_id,
                 updates={
-                "status": "interrupted",
-                "worker_pid": os.getpid(),
-                "interrupted_at": time.time(),
+                    "status": "cancelling",
+                    "worker_pid": os.getpid(),
+                    "interrupted_at": time.time(),
                 "reason": "cooperative_cancel_boundary",
                 "solved": result["solved"],
                 "skipped": result["skipped"],
@@ -248,7 +248,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 transition_state(
                     job_id, allowed_from={"cancel_requested", "cancelling"},
                     attempt_id=attempt_id,
-                    updates={"status": "interrupted",
+                    updates={"status": "cancelling",
                              "reason": "cancelled_before_terminal_commit"},
                 )
                 return 0
@@ -332,6 +332,29 @@ def _finalize_cleanup(
             pass
         _log(job_id, f"cleanup uncertain: {evidence}")
         return False
+    current = read_state(job_id) or {}
+    if (
+        current.get("status") == "cancelling"
+        and current.get("attempt_id") == attempt_id
+    ):
+        cancelled = transition_state(
+            job_id,
+            allowed_from={"cancelling"},
+            attempt_id=attempt_id,
+            updates={
+                "status": "cancelled",
+                "cancelled_at": time.time(),
+                "cleanup_proven": True,
+            },
+        )
+        if not cancelled.get("updated"):
+            _log(job_id, "cleanup proven but cancelled transition failed")
+            return False
+        append_event(job_id, {
+            "event": "cancelled_after_cleanup",
+            "attempt_id": attempt_id,
+            "cleanup_proven": True,
+        })
     exit_event = {
         "event": "worker_exited",
         "attempt_id": attempt_id,
