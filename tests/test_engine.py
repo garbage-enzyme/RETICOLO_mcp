@@ -408,6 +408,50 @@ class TestSolveValidation:
         assert r["status"] == "error"
         assert r["error_code"] == "invalid_D"
 
+    def test_tm_selects_tminc_branch_and_signed_angles(self):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        backend = MagicMock()
+        backend.workspace = {"py_R": 0.2, "py_T": 0.7}
+        eng._engine = backend
+        mock_matlab = MagicMock()
+        with patch("reticolo_mcp.engine._ensure_matlab", return_value=mock_matlab):
+            result = eng.solve_point(
+                wl_um=1.0, D=[1.0, 1.0], nn=[5, 5],
+                textures=[1.0, 1.5, 1.0],
+                profil={"heights": [0, 0.5, 0], "indices": [1, 2, 3]},
+                polarization=-1, theta_deg=-5.0, azimuth_deg=30.0,
+            )
+        commands = "\n".join(
+            call.args[0] for call in backend.eval.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        )
+        assert "TMinc_top_reflected" in commands
+        assert "TMinc_top_transmitted" in commands
+        assert "py_theta_deg*pi/180" in commands
+        assert result["theta_deg"] == -5.0
+        assert result["azimuth_deg"] == 30.0
+
+    @pytest.mark.parametrize(
+        ("kwargs", "error_code"),
+        [
+            ({"theta_deg": 90.0}, "invalid_theta"),
+            ({"theta_deg": float("nan")}, "invalid_theta"),
+            ({"azimuth_deg": 361.0}, "invalid_azimuth"),
+        ],
+    )
+    def test_invalid_incidence_angles(self, kwargs, error_code):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        eng._engine = MagicMock()
+        result = eng.solve_point(
+            wl_um=1.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]}, **kwargs,
+        )
+        assert result["error_code"] == error_code
+
 
 # ------------------------------------------------------------------
 # error classification

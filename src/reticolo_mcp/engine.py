@@ -22,14 +22,14 @@ RETICOLO conventions enforced here:
 
   polarization: parm.sym.pol =  1 → TE (electric field along y/rdir1)
                                -1 → TM (magnetic field along y/rdir1).
-    Both polarizations read efficiencies from ef.TEinc_top_* — the 'TEinc'
-    prefix refers to the top-incident direction, not the polarization state.
+    Result branches are ef.TEinc_top_* for TE and ef.TMinc_top_* for TM.
 """
 
 from __future__ import annotations
 
 import csv
 import locale
+import math
 import os
 import subprocess
 import threading
@@ -402,6 +402,8 @@ class REticoloEngine:
         textures: list[Any],
         profil: dict[str, list],
         polarization: int = 1,
+        theta_deg: float = 0.0,
+        azimuth_deg: float = 0.0,
         config_id: str = "",
     ) -> dict[str, Any]:
         """Solve one wavelength with RETICOLO.
@@ -413,6 +415,8 @@ class REticoloEngine:
             textures: RETICOLO texture cell array (Python list).
             profil: {"heights": [z0, z1, ..., 0], "indices": [i0, i1, ...]}.
             polarization: 1 for TE, -1 for TM (parm.sym.pol).
+            theta_deg: Signed incidence elevation in degrees (-90, 90).
+            azimuth_deg: Incidence-plane azimuth in degrees [-360, 360].
             config_id: Provenance tag.
 
         Returns:
@@ -437,6 +441,28 @@ class REticoloEngine:
             return {"status": "error", "error_code": "invalid_polarization",
                     "detail": "polarization must be 1 (TE) or -1 (TM)",
                     "config_id": config_id}
+        if (
+            isinstance(theta_deg, bool)
+            or not isinstance(theta_deg, (int, float))
+            or not math.isfinite(float(theta_deg))
+            or not -90.0 < float(theta_deg) < 90.0
+        ):
+            return {
+                "status": "error", "error_code": "invalid_theta",
+                "detail": "theta_deg must be finite and strictly between -90 and 90",
+                "config_id": config_id,
+            }
+        if (
+            isinstance(azimuth_deg, bool)
+            or not isinstance(azimuth_deg, (int, float))
+            or not math.isfinite(float(azimuth_deg))
+            or not -360.0 <= float(azimuth_deg) <= 360.0
+        ):
+            return {
+                "status": "error", "error_code": "invalid_azimuth",
+                "detail": "azimuth_deg must be finite and in [-360, 360]",
+                "config_id": config_id,
+            }
 
         matlab = _ensure_matlab()
         t0 = time.time()
@@ -452,20 +478,26 @@ class REticoloEngine:
                 [float(v) for v in profil["heights"]])
             eng.workspace["py_indices"] = matlab.int32(
                 [[int(v) for v in profil["indices"]]])
+            eng.workspace["py_theta_deg"] = float(theta_deg)
+            eng.workspace["py_azimuth_deg"] = float(azimuth_deg)
 
-            # TE (pol=1) and TM (pol=-1) both read from ef.TEinc_top_*
-            # — the prefix refers to top-incident direction, not polarization.
             eng.eval(f"parm.sym.pol = {pol};", nargout=0)
+            eng.eval(
+                "ro = py_theta_deg*pi/180; "
+                "delta0 = py_azimuth_deg*pi/180;",
+                nargout=0,
+            )
 
             eng.eval(
                 "[py_aa, ~] = res1(py_wl, py_D, py_textures, py_nn, ro, delta0, parm);",
                 nargout=0)
             eng.eval(
                 "ef = res2(py_aa, {py_heights, py_indices});", nargout=0)
+            channel = "TEinc" if pol == 1 else "TMinc"
             eng.eval(
-                "py_R = sum(ef.TEinc_top_reflected.efficiency);", nargout=0)
+                f"py_R = sum(ef.{channel}_top_reflected.efficiency);", nargout=0)
             eng.eval(
-                "py_T = sum(ef.TEinc_top_transmitted.efficiency);", nargout=0)
+                f"py_T = sum(ef.{channel}_top_transmitted.efficiency);", nargout=0)
             eng.eval("clear py_aa ef;", nargout=0)
 
             R = float(eng.workspace["py_R"])
@@ -488,6 +520,8 @@ class REticoloEngine:
                 "wl_um": wl_um,
                 "nn": nn_int,
                 "polarization": pol,
+                "theta_deg": float(theta_deg),
+                "azimuth_deg": float(azimuth_deg),
                 "R": R,
                 "T": T,
                 "A_balance": A_balance,
@@ -502,6 +536,8 @@ class REticoloEngine:
                 "wl_um": wl_um,
                 "nn": nn_int,
                 "polarization": pol,
+                "theta_deg": float(theta_deg),
+                "azimuth_deg": float(azimuth_deg),
                 "error": _classify_error(exc),
                 "config_id": config_id,
             }
