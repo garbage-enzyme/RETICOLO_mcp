@@ -463,6 +463,25 @@ class REticoloEngine:
                 "detail": "azimuth_deg must be finite and in [-360, 360]",
                 "config_id": config_id,
             }
+        incident_index = 1.0
+        if float(theta_deg) != 0.0:
+            try:
+                texture_index = int(profil["indices"][0]) - 1
+                incident_texture = textures[texture_index]
+                if not isinstance(incident_texture, (int, float, complex)):
+                    raise ValueError("incident texture must be uniform")
+                incident_value = complex(incident_texture)
+                if incident_value.imag != 0 or incident_value.real <= 0:
+                    raise ValueError("incident refractive index must be positive real")
+                incident_index = float(incident_value.real)
+            except (IndexError, KeyError, TypeError, ValueError) as exc:
+                return {
+                    "status": "error",
+                    "error_code": "unsupported_incident_medium",
+                    "detail": str(exc),
+                    "config_id": config_id,
+                }
+        ro_value = incident_index * math.sin(math.radians(float(theta_deg)))
 
         matlab = _ensure_matlab()
         t0 = time.time()
@@ -478,13 +497,12 @@ class REticoloEngine:
                 [float(v) for v in profil["heights"]])
             eng.workspace["py_indices"] = matlab.int32(
                 [[int(v) for v in profil["indices"]]])
-            eng.workspace["py_theta_deg"] = float(theta_deg)
+            eng.workspace["py_ro"] = ro_value
             eng.workspace["py_azimuth_deg"] = float(azimuth_deg)
 
             eng.eval(f"parm.sym.pol = {pol};", nargout=0)
             eng.eval(
-                "ro = py_theta_deg*pi/180; "
-                "delta0 = py_azimuth_deg*pi/180;",
+                "ro = py_ro; delta0 = py_azimuth_deg;",
                 nargout=0,
             )
 
@@ -522,6 +540,8 @@ class REticoloEngine:
                 "polarization": pol,
                 "theta_deg": float(theta_deg),
                 "azimuth_deg": float(azimuth_deg),
+                "ro": ro_value,
+                "incident_index": incident_index,
                 "R": R,
                 "T": T,
                 "A_balance": A_balance,
@@ -538,6 +558,8 @@ class REticoloEngine:
                 "polarization": pol,
                 "theta_deg": float(theta_deg),
                 "azimuth_deg": float(azimuth_deg),
+                "ro": ro_value,
+                "incident_index": incident_index,
                 "error": _classify_error(exc),
                 "config_id": config_id,
             }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import math
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -429,7 +430,10 @@ class TestSolveValidation:
         )
         assert "TMinc_top_reflected" in commands
         assert "TMinc_top_transmitted" in commands
-        assert "py_theta_deg*pi/180" in commands
+        assert "ro = py_ro" in commands
+        assert "delta0 = py_azimuth_deg" in commands
+        assert backend.workspace["py_ro"] == pytest.approx(-math.sin(math.radians(5)))
+        assert backend.workspace["py_azimuth_deg"] == 30.0
         assert result["theta_deg"] == -5.0
         assert result["azimuth_deg"] == 30.0
 
@@ -451,6 +455,18 @@ class TestSolveValidation:
             profil={"heights": [0, 0], "indices": [1, 1]}, **kwargs,
         )
         assert result["error_code"] == error_code
+
+    def test_oblique_incidence_rejects_patterned_superstrate(self):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        eng._engine = MagicMock()
+        result = eng.solve_point(
+            wl_um=1.0, D=[1.0, 1.0], nn=[5, 5],
+            textures=[[1.0, [0, 0, 0.2, 0.2, 1.5, 1]], 1.0],
+            profil={"heights": [0, 0], "indices": [1, 2]}, theta_deg=5.0,
+        )
+        assert result["error_code"] == "unsupported_incident_medium"
 
 
 # ------------------------------------------------------------------
