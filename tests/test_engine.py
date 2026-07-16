@@ -271,6 +271,47 @@ class TestEngineLifecycle:
 
         assert PROCESS_EXIT_WAIT_S >= 30.0
 
+    def test_stop_retry_recovers_proven_async_process_exit(self):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        eng._engine = MagicMock()
+        eng._quit_requested = True
+        eng._lease_token = "owned-token"
+        eng._matlab_processes = {4321: 123.0}
+        with (
+            patch.object(eng, "_wait_for_matlab_absent", return_value=True),
+            patch(
+                "reticolo_mcp.engine.lease_release",
+                return_value={"released": True},
+            ) as release,
+        ):
+            result = eng.stop()
+        assert result == {"status": "stopped", "recovered_async_exit": True}
+        assert eng._engine is None
+        assert eng._matlab_processes == {}
+        assert eng._quit_requested is False
+        release.assert_called_once_with("owned-token")
+
+    def test_stop_retry_retains_lease_while_async_process_is_alive(self):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        eng._engine = MagicMock()
+        eng._quit_requested = True
+        eng._lease_token = "owned-token"
+        eng._matlab_processes = {4321: 123.0}
+        with (
+            patch.object(eng, "_wait_for_matlab_absent", return_value=False),
+            patch("reticolo_mcp.engine.lease_release") as release,
+        ):
+            result = eng.stop()
+        assert result["status"] == "cleanup_uncertain"
+        assert result["matlab_pids"] == [4321]
+        assert eng._engine is not None
+        assert eng._quit_requested is True
+        release.assert_not_called()
+
     def test_process_inventory_parses_pid_and_creation_date(self):
         from reticolo_mcp.engine import _matlab_process_inventory
         completed = MagicMock(

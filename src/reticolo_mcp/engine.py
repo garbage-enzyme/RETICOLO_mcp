@@ -84,6 +84,7 @@ class REticoloEngine:
         self._heartbeat_thread: threading.Thread | None = None
         self._mode: str = "memory"
         self._matlab_processes: dict[int, float] = {}
+        self._quit_requested: bool = False
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -154,6 +155,7 @@ class REticoloEngine:
         try:
             import matlab.engine
             self._engine = matlab.engine.start_matlab()
+            self._quit_requested = False
             self._started_at = time.time()
             inventory_after = _matlab_process_inventory()
             if inventory_after is None:
@@ -188,6 +190,7 @@ class REticoloEngine:
             if owned_engine is not None:
                 try:
                     owned_engine.quit()
+                    self._quit_requested = True
                 except Exception as cleanup_exc:
                     return {
                         "status": "cleanup_uncertain",
@@ -218,6 +221,7 @@ class REticoloEngine:
             self._engine = None
             self._started_at = None
             self._matlab_processes = {}
+            self._quit_requested = False
             release = self._release_owned_lease()
             if not release["released"]:
                 return {
@@ -261,6 +265,16 @@ class REticoloEngine:
                 }
             return {"status": "stopped"}
 
+        if self._quit_requested:
+            if not self._wait_for_matlab_absent():
+                return {
+                    "status": "cleanup_uncertain",
+                    "connected": False,
+                    "error_code": "matlab_process_cleanup_unproven",
+                    "matlab_pids": sorted(self._matlab_processes),
+                }
+            return self._finalize_stopped(recovered_async_exit=True)
+
         cleanup_warnings = []
         for cmd in ("retio;", "clear all;"):
             try:
@@ -270,6 +284,7 @@ class REticoloEngine:
 
         try:
             self._engine.quit()
+            self._quit_requested = True
         except Exception as exc:
             return {
                 "status": "cleanup_uncertain",
@@ -288,9 +303,20 @@ class REticoloEngine:
                 "cleanup_warnings": cleanup_warnings,
             }
 
+        return self._finalize_stopped(cleanup_warnings=cleanup_warnings)
+
+    def _finalize_stopped(
+        self,
+        *,
+        cleanup_warnings: list[str] | None = None,
+        recovered_async_exit: bool = False,
+    ) -> dict[str, Any]:
+        """Clear a proven-absent MATLAB owner and release its exact lease."""
+        warnings = cleanup_warnings or []
         self._engine = None
         self._started_at = None
         self._matlab_processes = {}
+        self._quit_requested = False
         release = self._release_owned_lease()
         if not release["released"]:
             return {
@@ -298,11 +324,13 @@ class REticoloEngine:
                 "connected": False,
                 "error_code": "lease_release_failed",
                 "detail": release.get("detail", "lease release failed"),
-                "cleanup_warnings": cleanup_warnings,
+                "cleanup_warnings": warnings,
             }
-        result = {"status": "stopped"}
-        if cleanup_warnings:
-            result["cleanup_warnings"] = cleanup_warnings
+        result: dict[str, Any] = {"status": "stopped"}
+        if warnings:
+            result["cleanup_warnings"] = warnings
+        if recovered_async_exit:
+            result["recovered_async_exit"] = True
         return result
 
     def _release_owned_lease(self) -> dict[str, Any]:
