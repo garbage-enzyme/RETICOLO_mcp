@@ -90,6 +90,10 @@ def main(job_id: str | None = None) -> int:
             return 1
         # Convert JSON-safe [re, im] pairs back to Python complex.
         spec["_textures_complex"] = _to_complex(spec.get("textures", []))
+        if spec.get("point_textures") is not None:
+            spec["_point_textures_complex"] = [
+                _to_complex(value) for value in spec["point_textures"]
+            ]
         return _run_job(job_id, spec)
     except Exception:
         traceback.print_exc()
@@ -175,6 +179,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
             nn=spec["nn"],
             D=D,
             textures=spec.get("_textures_complex", spec.get("textures", [1.0])),
+            point_textures=spec.get("_point_textures_complex"),
             profil={
                 "heights": spec.get("profil_heights", [0, 0]),
                 "indices": spec.get("profil_indices", [1, 1]),

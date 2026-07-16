@@ -374,6 +374,7 @@ def job_submit(
     nn: list[int],
     textures: list,
     profil: dict,
+    point_textures: list | None = None,
     polarization: int = 1,
     config_label: str = "",
     mode: str = "memory",
@@ -400,9 +401,30 @@ def job_submit(
         return {"status": "error", "error_code": "invalid_wavelength"}
     if nonfinite:
         return {"status": "error", "error_code": "nonfinite_wavelength"}
-    for wl in wls_um:
+    if point_textures is not None and len(point_textures) != len(wls_um):
+        return {
+            "status": "error", "error_code": "point_textures_length_mismatch",
+            "wavelength_count": len(wls_um),
+            "point_textures_count": len(point_textures),
+        }
+    if (
+        point_textures is not None
+        and len({format(float(wl), ".17g") for wl in wls_um}) != len(wls_um)
+    ):
+        return {"status": "error", "error_code": "duplicate_wavelength"}
+    if point_textures is not None:
         err = _validate_solve_inputs(
-            wl_um=wl, D=D, nn=nn, textures=textures, profil=profil,
+            wl_um=wls_um[0], D=D, nn=nn, textures=textures, profil=profil,
+            polarization=polarization, config_id=config_label,
+        )
+        if err:
+            return err
+    for index, wl in enumerate(wls_um):
+        point_texture = (
+            point_textures[index] if point_textures is not None else textures
+        )
+        err = _validate_solve_inputs(
+            wl_um=wl, D=D, nn=nn, textures=point_texture, profil=profil,
             polarization=polarization, config_id=config_label,
         )
         if err:
@@ -440,6 +462,7 @@ def job_submit(
     attempt_id = uuid.uuid4().hex
     spec = jobs.create_job_spec(
         wls_um=wls_um, D=D, nn=nn, textures=textures, profil=profil,
+        point_textures=point_textures,
         polarization=polarization, config_label=config_label, mode=mode,
         resource_policy=parsed_policy.model_dump(mode="json"),
         resource_decision=decision,

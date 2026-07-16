@@ -258,6 +258,45 @@ class TestPublicJobControls:
         assert state["attempt"] == 1
         assert state["attempt_id"] == result["attempt_id"]
 
+    def test_submit_rejects_misaligned_point_textures_before_spawn(self, monkeypatch):
+        spawn = MagicMock()
+        monkeypatch.setattr(server, "_spawn_worker", spawn)
+        result = server.job_submit(
+            wls_um=[1.0, 1.1], D=[1.0], nn=[3, 3], textures=[1.0],
+            point_textures=[[1.0]],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "point_textures_length_mismatch"
+        spawn.assert_not_called()
+
+    def test_submit_validates_every_point_texture_before_spawn(self, monkeypatch):
+        spawn = MagicMock()
+        monkeypatch.setattr(server, "_spawn_worker", spawn)
+        result = server.job_submit(
+            wls_um=[1.0, 1.1], D=[1.0], nn=[3, 3], textures=[1.0],
+            point_textures=[[1.0], []],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert result["error_code"] == "invalid_textures"
+        spawn.assert_not_called()
+
+    def test_submit_point_textures_require_valid_base_and_unique_wavelengths(self, monkeypatch):
+        spawn = MagicMock()
+        monkeypatch.setattr(server, "_spawn_worker", spawn)
+        invalid_base = server.job_submit(
+            wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[],
+            point_textures=[[1.0]],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        duplicate = server.job_submit(
+            wls_um=[1.0, 1.0], D=[1.0], nn=[3, 3], textures=[1.0],
+            point_textures=[[1.0], [1.1]],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        assert invalid_base["error_code"] == "invalid_textures"
+        assert duplicate["error_code"] == "duplicate_wavelength"
+        spawn.assert_not_called()
+
     def test_submit_spawn_failure_is_durable(self, monkeypatch):
         monkeypatch.setattr(
             server, "sample_resources", lambda **_kwargs: self._green_snapshot(),

@@ -61,6 +61,32 @@ class TestReadCompleted:
 
 
 class TestRunSweep:
+    def test_point_textures_follow_exact_wavelength_after_sorting(self, tmp_path):
+        engine = MagicMock()
+        engine.solve_point.side_effect = lambda **kwargs: _ok_result(kwargs["wl_um"])
+        run_sweep(
+            engine, wls_um=[5.1, 5.0], nn=[5, 5], D=1.0,
+            textures=["fallback"],
+            point_textures=[["at-5.1"], ["at-5.0"]],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            config_hash="dispersive", csv_path=tmp_path / "sweep.csv",
+        )
+        assert [call.kwargs["wl_um"] for call in engine.solve_point.call_args_list] == [
+            5.0, 5.1,
+        ]
+        assert [call.kwargs["textures"] for call in engine.solve_point.call_args_list] == [
+            ["at-5.0"], ["at-5.1"],
+        ]
+
+    def test_point_textures_length_must_match(self, tmp_path):
+        with pytest.raises(ValueError, match="one-to-one"):
+            run_sweep(
+                MagicMock(), wls_um=[5.0, 5.1], nn=[5, 5], D=1.0,
+                textures=[1.0], point_textures=[[1.0]],
+                profil={"heights": [0, 0], "indices": [1, 1]},
+                csv_path=tmp_path / "sweep.csv",
+            )
+
     def test_resource_refusal_stops_before_point(self, tmp_path):
         engine = MagicMock()
         result = run_sweep(

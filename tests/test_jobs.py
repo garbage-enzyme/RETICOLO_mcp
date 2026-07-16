@@ -70,6 +70,37 @@ class TestSpecHash:
                              profil={"heights":[0,0],"indices":[1,1]})
         assert s1["config_hash"] != s2["config_hash"]
 
+    def test_point_textures_are_normalized_and_identity_bound(self):
+        common = dict(
+            wls_um=[5.0, 5.1], D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        s1 = create_job_spec(
+            **common, point_textures=[[[1.0, 0.0]], [[1.1, 0.1]]],
+        )
+        s2 = create_job_spec(
+            **common, point_textures=[[[1.0, 0.0]], [[1.2, 0.1]]],
+        )
+        assert s1["schema"] == "2"
+        assert s1["point_textures"] == [[[1.0, 0.0]], [[1.1, 0.1]]]
+        assert s1["physical_config_hash"] != s2["physical_config_hash"]
+        assert s1["job_spec_hash"] != s2["job_spec_hash"]
+
+    def test_point_textures_reject_misalignment_and_duplicate_wavelengths(self):
+        common = dict(
+            D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        with pytest.raises(ValueError, match="one-to-one"):
+            create_job_spec(
+                **common, wls_um=[5.0, 5.1], point_textures=[[1.0]],
+            )
+        with pytest.raises(ValueError, match="unique wavelengths"):
+            create_job_spec(
+                **common, wls_um=[5.0, 5.0],
+                point_textures=[[1.0], [1.1]],
+            )
+
 
 class TestJobStore:
     @pytest.fixture(autouse=True)

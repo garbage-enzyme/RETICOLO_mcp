@@ -63,6 +63,27 @@ class TestToComplex:
         result = _to_complex([1.0, 1.5, 1.0])
         assert result == [1.0, 1.5, 1.0]
 
+    def test_main_converts_dispersive_point_textures(self, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("reticolo_mcp.worker._setup_logging", lambda _job_id: None)
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.read_spec",
+            lambda _job_id: {
+                "textures": [[1.0, 0.0]],
+                "point_textures": [[[1.0, 0.0]], [[2.0, 0.1]]],
+            },
+        )
+        monkeypatch.setattr(
+            "reticolo_mcp.worker._run_job",
+            lambda _job_id, spec: captured.update(spec) or 0,
+        )
+
+        assert main("job-dispersive") == 0
+        assert captured["_textures_complex"] == [complex(1.0, 0.0)]
+        assert captured["_point_textures_complex"] == [
+            [complex(1.0, 0.0)], [complex(2.0, 0.1)],
+        ]
+
 
 class TestCancelControl:
     def test_cancel_requested_state(self, monkeypatch):

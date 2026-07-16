@@ -31,6 +31,7 @@ def run_sweep(
     D: float | list[float],
     textures: list[Any],
     profil: dict[str, list],
+    point_textures: list[list[Any]] | None = None,
     polarization: int = 1,
     config_id: str = "",
     config_hash: str = "",
@@ -47,6 +48,8 @@ def run_sweep(
         nn: Fourier orders [nx, ny].
         D: Lattice period(s).
         textures: RETICOLO texture definitions.
+        point_textures: Optional texture definitions aligned one-to-one with
+                        ``wls_um`` for dispersive point schedules.
         profil: Layer thickness profile.
         polarization: 1 for TE, -1 for TM.
         config_id: Human-readable label (optional).
@@ -62,6 +65,15 @@ def run_sweep(
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     D_list = [float(D)] if isinstance(D, (int, float)) else [float(v) for v in D]
+    if point_textures is not None and len(point_textures) != len(wls_um):
+        raise ValueError("point_textures must align one-to-one with wls_um")
+    textures_by_wavelength = (
+        {
+            _wavelength_key(wl): point_texture
+            for wl, point_texture in zip(wls_um, point_textures)
+        }
+        if point_textures is not None else {}
+    )
 
     file_exists = csv_path.exists()
     if file_exists and config_hash:
@@ -113,7 +125,10 @@ def run_sweep(
             row_time = time.time()
             result = engine.solve_point(
                 wl_um=wl, D=D_list, nn=nn,
-                textures=textures, profil=profil,
+                textures=textures_by_wavelength.get(
+                    _wavelength_key(wl), textures,
+                ),
+                profil=profil,
                 polarization=polarization, config_id=config_id,
             )
 
@@ -173,6 +188,10 @@ def _cancel_requested(callback: Callable[[], bool] | None) -> bool:
         return bool(callback())
     except Exception:
         return True
+
+
+def _wavelength_key(wl: float) -> str:
+    return format(float(wl), ".17g")
 
 
 def _point_admission(

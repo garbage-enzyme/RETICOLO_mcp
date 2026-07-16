@@ -22,7 +22,7 @@ from .config import RUNTIME_DIR
 from .config_hash import normalize_textures
 from .durable_io import atomic_write_bytes
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 MAX_SPEC_BYTES = 256 * 1024
 MAX_JOB_ID_LEN = 128
 MAX_EVENT_TAIL = 100
@@ -72,6 +72,7 @@ def _physical_identity_payload(spec: dict[str, Any]) -> dict[str, Any]:
         "D": spec.get("D", []),
         "nn": spec.get("nn", []),
         "textures": spec.get("textures", []),
+        "point_textures": spec.get("point_textures"),
         "profil_heights": spec.get("profil_heights", []),
         "profil_indices": spec.get("profil_indices", []),
         "polarization": spec.get("polarization", 1),
@@ -103,6 +104,7 @@ def create_job_spec(
     nn: list[int],
     textures: list[Any],
     profil: dict[str, list],
+    point_textures: list[list[Any]] | None = None,
     polarization: int = 1,
     config_hash: str = "",
     config_label: str = "",
@@ -111,6 +113,10 @@ def create_job_spec(
     resource_decision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build and validate an immutable job specification."""
+    if point_textures is not None and len(point_textures) != len(wls_um):
+        raise ValueError("point_textures must align one-to-one with wls_um")
+    if point_textures is not None and len({format(float(wl), ".17g") for wl in wls_um}) != len(wls_um):
+        raise ValueError("point_textures require unique wavelengths")
     spec: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "job_type": "staged_sweep",
@@ -119,6 +125,10 @@ def create_job_spec(
         "D": [float(v) for v in D],
         "nn": [int(v) for v in nn],
         "textures": normalize_textures(textures),
+        "point_textures": (
+            [normalize_textures(value) for value in point_textures]
+            if point_textures is not None else None
+        ),
         "profil_heights": [float(v) for v in profil.get("heights", [])],
         "profil_indices": [int(v) for v in profil.get("indices", [])],
         "polarization": int(polarization),
