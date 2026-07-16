@@ -190,6 +190,37 @@ class TestFinalCleanup:
         assert transitions[0][1]["updates"]["status"] == "cleanup_uncertain"
         assert events[0]["event"] == "worker_cleanup_uncertain"
 
+    def test_async_exit_cleanup_is_retried_by_exact_worker(self, monkeypatch):
+        results = iter([
+            {
+                "status": "cleanup_uncertain",
+                "error_code": "matlab_process_cleanup_unproven",
+            },
+            {"status": "stopped", "recovered_async_exit": True},
+        ])
+        calls = []
+
+        class Engine:
+            def stop(self):
+                calls.append(True)
+                return next(results)
+
+        events = []
+        monkeypatch.setattr(
+            "reticolo_mcp.worker.append_event",
+            lambda _job_id, event: events.append(event),
+        )
+        monkeypatch.setattr("reticolo_mcp.worker._log", lambda *_args: None)
+        assert _finalize_cleanup("job-abc", "attempt-1", Engine()) is True
+        assert len(calls) == 2
+        assert events == [{
+            "event": "worker_exited",
+            "attempt_id": "attempt-1",
+            "cleanup_proven": True,
+            "cleanup_attempts": 2,
+            "recovered_async_exit": True,
+        }]
+
     def test_stop_exception_is_bounded_cleanup_uncertainty(self, monkeypatch):
         def fail_stop():
             raise RuntimeError("x" * 1000)

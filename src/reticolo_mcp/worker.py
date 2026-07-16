@@ -13,6 +13,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+from typing import Any
 
 # Ensure src/ is importable when run standalone
 _HERE = Path(__file__).resolve().parent
@@ -286,14 +287,22 @@ def _finalize_cleanup(
     job_id: str, attempt_id: str, eng: REticoloEngine,
 ) -> bool:
     """Record a terminal exit only after exact engine cleanup is proven."""
-    try:
-        cleanup = eng.stop()
-    except Exception as exc:
-        cleanup = {
-            "status": "cleanup_uncertain",
-            "error_code": "engine_stop_raised",
-            "detail": f"{type(exc).__name__}: {exc}"[:500],
-        }
+    cleanup_attempts = 0
+    cleanup: dict[str, Any] = {}
+    for _ in range(3):
+        cleanup_attempts += 1
+        try:
+            cleanup = eng.stop()
+        except Exception as exc:
+            cleanup = {
+                "status": "cleanup_uncertain",
+                "error_code": "engine_stop_raised",
+                "detail": f"{type(exc).__name__}: {exc}"[:500],
+            }
+        if cleanup.get("status") == "stopped":
+            break
+        if cleanup.get("error_code") != "matlab_process_cleanup_unproven":
+            break
     if cleanup.get("status") != "stopped":
         evidence = {
             key: cleanup[key]
@@ -323,11 +332,17 @@ def _finalize_cleanup(
             pass
         _log(job_id, f"cleanup uncertain: {evidence}")
         return False
-    append_event(job_id, {
+    exit_event = {
         "event": "worker_exited",
         "attempt_id": attempt_id,
         "cleanup_proven": True,
-    })
+    }
+    if cleanup_attempts > 1:
+        exit_event["cleanup_attempts"] = cleanup_attempts
+        exit_event["recovered_async_exit"] = bool(
+            cleanup.get("recovered_async_exit")
+        )
+    append_event(job_id, exit_event)
     _log(job_id, "worker exited after proven cleanup")
     return True
 
