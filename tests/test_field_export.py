@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from reticolo_mcp.field_export import (
     _component_index,
+    _field_identities,
     _plan_field_grid,
     _reshape_res3_field,
     _resolve_output_dir,
@@ -159,14 +160,57 @@ def test_res3_field_shape_is_restored_with_singleton_plane():
 
 
 def test_field_artifact_uses_generated_safe_name_and_hash(tmp_path):
+    identities = {
+        "field_schema": "reticolo_field_artifact/1",
+        "collector_source_sha256": "1" * 64,
+        "reticolo_source_sha256": "2" * 64,
+        "physical_config_sha256": "3" * 64,
+        "point_fingerprint_sha256": "4" * 64,
+        "field_request_sha256": "5" * 64,
+    }
     path, digest = _write_field_artifact(
         tmp_path, "field-safe123", x=np.array([0.0]), y=np.array([0.0]),
         z=np.array([0.0]), field=np.array([1.0 + 2.0j]),
+        identities=identities,
     )
     assert path.parent == tmp_path
     assert path.name == "field-safe123.npz"
     assert len(digest) == 64
     assert not list(tmp_path.glob("*.tmp.npz"))
+    with np.load(path) as artifact:
+        for key, value in identities.items():
+            assert artifact[key].item() == value
+
+
+def test_field_identities_are_deterministic_and_request_specific(tmp_path):
+    (tmp_path / "res1.m").write_text("function x=res1; x=1; end\n", encoding="utf-8")
+    (tmp_path / "res3.m").write_text("function x=res3; x=1; end\n", encoding="utf-8")
+    kwargs = dict(
+        reticolo_root=tmp_path,
+        wl_um=1.0,
+        D=[1.0, 1.0],
+        nn=[3, 3],
+        textures=[1.0, 1.5, 1.0],
+        profil={"heights": [0.1, 0.2, 0.1], "indices": [1, 2, 3]},
+        polarization=1,
+        component="normE",
+        slice_axis="y",
+        slice_value=0.0,
+        slice_tol=1e-9,
+        max_points=2000,
+        x_points=11,
+        y_points=3,
+        z_points_per_layer=7,
+    )
+    first = _field_identities(**kwargs)
+    assert first == _field_identities(**kwargs)
+    changed = _field_identities(**{**kwargs, "component": "Ex"})
+    assert changed["physical_config_sha256"] == first["physical_config_sha256"]
+    assert changed["point_fingerprint_sha256"] == first["point_fingerprint_sha256"]
+    assert changed["field_request_sha256"] != first["field_request_sha256"]
+    assert all(
+        len(value) == 64 for key, value in first.items() if key.endswith("sha256")
+    )
 
 
 class TestArtifactPathPolicy:

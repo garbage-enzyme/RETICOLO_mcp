@@ -17,6 +17,8 @@ from typing import Any
 
 from .engine import _ensure_matlab, _textures_to_cell
 from .config import ARTIFACT_ROOT
+from .capabilities import _source_identity
+from .config_hash import compute_config_hash
 import numpy as np
 
 
@@ -95,6 +97,29 @@ def export_field(
         return {
             "status": "error", "error_code": "field_point_estimate_exceeded",
             "estimated_points": estimated_points, "max_points": max_points,
+        }
+    try:
+        identities = _field_identities(
+            reticolo_root=Path(engine._reticolo_dir),
+            wl_um=wl_um,
+            D=D,
+            nn=nn,
+            textures=textures,
+            profil=profil,
+            polarization=polarization,
+            component=component,
+            slice_axis=slice_axis,
+            slice_value=slice_value,
+            slice_tol=slice_tol,
+            max_points=max_points,
+            x_points=x_points,
+            y_points=y_points,
+            z_points_per_layer=z_points_per_layer,
+        )
+    except (OSError, ValueError) as exc:
+        return {
+            "status": "error", "error_code": "field_identity_failed",
+            "detail": str(exc),
         }
     if engine._engine is None:
         return {"status": "error", "error_code": "engine_not_started"}
@@ -226,6 +251,7 @@ def export_field(
         "field_max": float(np.max(np.abs(field))),
         "field_min": float(np.min(np.abs(field))),
         "solve_time_s": round(time.time() - t0, 1),
+        **identities,
     }
 
     if safe_output_dir is not None:
@@ -234,6 +260,7 @@ def export_field(
         artifact_id = f"field-{uuid.uuid4().hex[:16]}"
         npz_path, npz_hash = _write_field_artifact(
             out, artifact_id, x=slice_x, y=slice_y, z=slice_z, field=field,
+            identities=identities,
         )
         result["artifact_id"] = artifact_id
         result["artifact_sha256"] = npz_hash
@@ -384,6 +411,85 @@ def _reshape_res3_field(
     return array.reshape(nz, nx, ny, components)
 
 
+def _field_identities(
+    *,
+    reticolo_root: Path,
+    wl_um: float,
+    D: list[float],
+    nn: list[int],
+    textures: list[Any],
+    profil: dict[str, list],
+    polarization: int,
+    component: str,
+    slice_axis: str,
+    slice_value: float,
+    slice_tol: float,
+    max_points: int,
+    x_points: int,
+    y_points: int,
+    z_points_per_layer: int,
+) -> dict[str, str]:
+    reticolo_source_sha256 = _reticolo_source_identity(reticolo_root)
+    physical_config_sha256 = compute_config_hash(
+        schema_version="reticolo_field_physical/1",
+        reticolo_version=reticolo_source_sha256,
+        wls_um=[wl_um],
+        D=D,
+        nn=nn,
+        textures=textures,
+        profil=profil,
+        polarization=polarization,
+    )
+    point_fingerprint_sha256 = _canonical_sha256({
+        "schema": "reticolo_field_point/1",
+        "physical_config_sha256": physical_config_sha256,
+        "wl_um": float(wl_um),
+        "nn": [int(value) for value in nn],
+        "polarization": int(polarization),
+    })
+    field_request_sha256 = _canonical_sha256({
+        "schema": "reticolo_field_request/1",
+        "point_fingerprint_sha256": point_fingerprint_sha256,
+        "component": component,
+        "slice_axis": slice_axis,
+        "slice_value": float(slice_value),
+        "slice_tol": float(slice_tol),
+        "max_points": max_points,
+        "x_points": x_points,
+        "y_points": y_points,
+        "z_points_per_layer": z_points_per_layer,
+    })
+    return {
+        "field_schema": "reticolo_field_artifact/1",
+        "collector_source_sha256": _source_identity(),
+        "reticolo_source_sha256": reticolo_source_sha256,
+        "physical_config_sha256": physical_config_sha256,
+        "point_fingerprint_sha256": point_fingerprint_sha256,
+        "field_request_sha256": field_request_sha256,
+    }
+
+
+def _reticolo_source_identity(root: Path) -> str:
+    resolved = root.resolve(strict=True)
+    paths = sorted(resolved.glob("*.m"), key=lambda path: path.name.casefold())
+    if not paths:
+        raise ValueError("RETICOLO source root has no .m files")
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _canonical_sha256(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _resolve_output_dir(output_dir: str | Path | None) -> Path | None:
     if output_dir is None or str(output_dir) == "":
         return None
@@ -398,7 +504,7 @@ def _resolve_output_dir(output_dir: str | Path | None) -> Path | None:
 
 def _write_field_artifact(
     output_dir: Path, artifact_id: str, *, x: np.ndarray, y: np.ndarray,
-    z: np.ndarray, field: np.ndarray,
+    z: np.ndarray, field: np.ndarray, identities: dict[str, str],
 ) -> tuple[Path, str]:
     final_path = output_dir / f"{artifact_id}.npz"
     temp_path = output_dir / f".{artifact_id}.{uuid.uuid4().hex[:8]}.tmp.npz"
@@ -406,6 +512,7 @@ def _write_field_artifact(
         np.savez_compressed(
             temp_path, x=x, y=y, z=z, field=np.abs(field),
             field_complex=field if np.iscomplexobj(field) else np.abs(field),
+            **{key: np.array(value) for key, value in identities.items()},
         )
         with open(temp_path, "r+b") as f:
             os.fsync(f.fileno())
