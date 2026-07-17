@@ -60,6 +60,7 @@ python -m reticolo_mcp.server
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实 restart/resume 与安全边界 cancel 收据已通过；接口仍为实验性 |
 | `reticolo_convergence` | 实验性 | MCP 执行尚未通过发布验收；外部归档证据不能提升其成熟度 |
 | `reticolo_field_export` | 实验性；已验证均匀 TE artifact | 有界 `res3` 导出通过；paired mode comparison 尚未验收 |
+| `reticolo_field_pair` | 实验性 solver-free assembler | 校验同一精确网格上的两个哈希 artifact 并输出共享色限；不做模式分类 |
 
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
 历史基准证据，不会自动把当前所有工具版本提升为“已验证”。

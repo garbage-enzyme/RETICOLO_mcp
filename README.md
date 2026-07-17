@@ -59,6 +59,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `job_submit/status/tail/cancel/resume` | Experimental | Real restart/resume and safe-boundary cancellation receipts passed; interface remains experimental |
 | `reticolo_convergence` | Experimental | MCP execution is not release accepted; external archived evidence cannot promote it |
 | `reticolo_field_export` | Experimental; verified uniform TE artifact | Bounded `res3` export passed; paired mode comparison is not accepted |
+| `reticolo_field_pair` | Experimental solver-free assembler | Verifies two hashed artifacts on one exact grid and emits shared limits; no mode classification |
 
 Use `reticolo_capabilities` as the live maturity and deployment receipt. Historical
 real-engine results below remain fixture evidence; they do not promote every current

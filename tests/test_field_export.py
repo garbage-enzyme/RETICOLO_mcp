@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import numpy as np
 from unittest.mock import MagicMock
 
 from reticolo_mcp.field_export import (
+    assemble_field_pair,
     _component_index,
     _field_identities,
     _plan_field_grid,
@@ -165,8 +168,10 @@ def test_field_artifact_uses_generated_safe_name_and_hash(tmp_path):
         "collector_source_sha256": "1" * 64,
         "reticolo_source_sha256": "2" * 64,
         "physical_config_sha256": "3" * 64,
-        "point_fingerprint_sha256": "4" * 64,
-        "field_request_sha256": "5" * 64,
+        "pairing_config_sha256": "4" * 64,
+        "point_fingerprint_sha256": "5" * 64,
+        "field_sampling_sha256": "6" * 64,
+        "field_request_sha256": "7" * 64,
     }
     path, digest = _write_field_artifact(
         tmp_path, "field-safe123", x=np.array([0.0]), y=np.array([0.0]),
@@ -206,11 +211,95 @@ def test_field_identities_are_deterministic_and_request_specific(tmp_path):
     assert first == _field_identities(**kwargs)
     changed = _field_identities(**{**kwargs, "component": "Ex"})
     assert changed["physical_config_sha256"] == first["physical_config_sha256"]
+    assert changed["pairing_config_sha256"] == first["pairing_config_sha256"]
     assert changed["point_fingerprint_sha256"] == first["point_fingerprint_sha256"]
+    assert changed["field_sampling_sha256"] != first["field_sampling_sha256"]
     assert changed["field_request_sha256"] != first["field_request_sha256"]
     assert all(
         len(value) == 64 for key, value in first.items() if key.endswith("sha256")
     )
+
+
+class TestFieldPair:
+    @staticmethod
+    def _identities(point_digit: str, physical_digit: str, request_digit: str):
+        return {
+            "field_schema": "reticolo_field_artifact/1",
+            "collector_source_sha256": "1" * 64,
+            "reticolo_source_sha256": "2" * 64,
+            "physical_config_sha256": physical_digit * 64,
+            "pairing_config_sha256": "4" * 64,
+            "point_fingerprint_sha256": point_digit * 64,
+            "field_sampling_sha256": "6" * 64,
+            "field_request_sha256": request_digit * 64,
+        }
+
+    def _artifacts(self, root, monkeypatch, *, mismatched_grid=False):
+        root.mkdir()
+        monkeypatch.setattr("reticolo_mcp.field_export.ARTIFACT_ROOT", root)
+        x = np.array([0.0, 1.0])
+        y = np.array([0.0, 0.0])
+        z = np.array([0.0, 0.0])
+        on_path, on_hash = _write_field_artifact(
+            root, "field-on", x=x, y=y, z=z,
+            field=np.array([2.0, 4.0]),
+            identities=self._identities("5", "3", "7"),
+        )
+        off_path, off_hash = _write_field_artifact(
+            root, "field-off", x=x, y=np.array([0.0, 1.0]) if mismatched_grid else y,
+            z=z, field=np.array([1.0, 2.0]),
+            identities=self._identities("8", "9", "a"),
+        )
+        return on_path, on_hash, off_path, off_hash
+
+    def test_pair_uses_exact_grid_shared_limits_and_no_mode_claim(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        on_path, on_hash, off_path, off_hash = self._artifacts(root, monkeypatch)
+        result = assemble_field_pair(
+            on_artifact=on_path, off_artifact=off_path,
+            on_sha256=on_hash, off_sha256=off_hash,
+            output_dir=root / "pairs",
+        )
+        assert result["status"] == "ok"
+        assert result["shared_limits"] == [1.0, 4.0]
+        assert result["max_abs_ratio_on_over_off"] == 2.0
+        assert result["mean_square_ratio_on_over_off"] == 4.0
+        assert result["visual_review_state"] == "visual_review_required"
+        assert result["claim_scope"] == "numerical_pair_only_no_mode_classification"
+        assert Path(result["artifact_path"]).is_file()
+        assert Path(result["summary_path"]).is_file()
+
+    def test_pair_rejects_hash_mismatch(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        on_path, _, off_path, off_hash = self._artifacts(root, monkeypatch)
+        result = assemble_field_pair(
+            on_artifact=on_path, off_artifact=off_path,
+            on_sha256="0" * 64, off_sha256=off_hash,
+            output_dir=root / "pairs",
+        )
+        assert result["error_code"] == "field_pair_hash_mismatch"
+
+    def test_pair_rejects_grid_mismatch(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        on_path, on_hash, off_path, off_hash = self._artifacts(
+            root, monkeypatch, mismatched_grid=True,
+        )
+        result = assemble_field_pair(
+            on_artifact=on_path, off_artifact=off_path,
+            on_sha256=on_hash, off_sha256=off_hash,
+            output_dir=root / "pairs",
+        )
+        assert result["error_code"] == "field_pair_grid_mismatch"
+
+    def test_pair_rejects_path_escape(self, tmp_path, monkeypatch):
+        root = tmp_path / "artifacts"
+        on_path, on_hash, off_path, off_hash = self._artifacts(root, monkeypatch)
+        result = assemble_field_pair(
+            on_artifact=on_path, off_artifact=off_path,
+            on_sha256=on_hash, off_sha256=off_hash,
+            output_dir=tmp_path / "outside",
+        )
+        assert result["error_code"] == "unsafe_field_pair_path"
 
 
 class TestArtifactPathPolicy:

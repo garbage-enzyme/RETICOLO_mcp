@@ -12,6 +12,7 @@ import math
 import os
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,8 @@ HARD_MAX_FIELD_POINTS = 500_000
 HARD_MAX_AXIS_POINTS = 201
 HARD_MAX_Z_POINTS_PER_LAYER = 201
 HARD_MAX_FIELD_ORDER = 15
+HARD_MAX_FIELD_ARTIFACT_BYTES = 64 * 1024 * 1024
+HARD_MAX_FIELD_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 
 
 def export_field(
@@ -440,6 +443,16 @@ def _field_identities(
         profil=profil,
         polarization=polarization,
     )
+    pairing_config_sha256 = compute_config_hash(
+        schema_version="reticolo_field_pairing_physical/1",
+        reticolo_version=reticolo_source_sha256,
+        wls_um=[],
+        D=D,
+        nn=nn,
+        textures=textures,
+        profil=profil,
+        polarization=polarization,
+    )
     point_fingerprint_sha256 = _canonical_sha256({
         "schema": "reticolo_field_point/1",
         "physical_config_sha256": physical_config_sha256,
@@ -447,9 +460,8 @@ def _field_identities(
         "nn": [int(value) for value in nn],
         "polarization": int(polarization),
     })
-    field_request_sha256 = _canonical_sha256({
-        "schema": "reticolo_field_request/1",
-        "point_fingerprint_sha256": point_fingerprint_sha256,
+    sampling_payload = {
+        "schema": "reticolo_field_sampling/1",
         "component": component,
         "slice_axis": slice_axis,
         "slice_value": float(slice_value),
@@ -458,13 +470,21 @@ def _field_identities(
         "x_points": x_points,
         "y_points": y_points,
         "z_points_per_layer": z_points_per_layer,
+    }
+    field_sampling_sha256 = _canonical_sha256(sampling_payload)
+    field_request_sha256 = _canonical_sha256({
+        "schema": "reticolo_field_request/1",
+        "point_fingerprint_sha256": point_fingerprint_sha256,
+        "field_sampling_sha256": field_sampling_sha256,
     })
     return {
         "field_schema": "reticolo_field_artifact/1",
         "collector_source_sha256": _source_identity(),
         "reticolo_source_sha256": reticolo_source_sha256,
         "physical_config_sha256": physical_config_sha256,
+        "pairing_config_sha256": pairing_config_sha256,
         "point_fingerprint_sha256": point_fingerprint_sha256,
+        "field_sampling_sha256": field_sampling_sha256,
         "field_request_sha256": field_request_sha256,
     }
 
@@ -488,6 +508,187 @@ def _canonical_sha256(payload: dict[str, Any]) -> str:
         payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def assemble_field_pair(
+    *,
+    on_artifact: str | Path,
+    off_artifact: str | Path,
+    on_sha256: str,
+    off_sha256: str,
+    output_dir: str | Path,
+) -> dict[str, Any]:
+    """Validate two field artifacts and emit a bounded shared-grid pair."""
+    try:
+        out = _resolve_output_dir(output_dir)
+        if out is None:
+            raise ValueError("output_dir is required")
+        on_path = _resolve_input_artifact(on_artifact)
+        off_path = _resolve_input_artifact(off_artifact)
+    except ValueError as exc:
+        return {"status": "error", "error_code": "unsafe_field_pair_path", "detail": str(exc)}
+    if on_path == off_path:
+        return {"status": "error", "error_code": "field_pair_requires_distinct_artifacts"}
+    actual_hashes = {"on": _sha256_path(on_path), "off": _sha256_path(off_path)}
+    if actual_hashes != {"on": on_sha256, "off": off_sha256}:
+        return {
+            "status": "error", "error_code": "field_pair_hash_mismatch",
+            "actual_sha256": actual_hashes,
+        }
+    try:
+        on = _load_field_artifact(on_path)
+        off = _load_field_artifact(off_path)
+    except (OSError, ValueError) as exc:
+        return {"status": "error", "error_code": "invalid_field_pair_artifact", "detail": str(exc)[:500]}
+
+    equal_metadata = (
+        "field_schema", "collector_source_sha256", "reticolo_source_sha256",
+        "pairing_config_sha256", "field_sampling_sha256",
+    )
+    mismatched = [name for name in equal_metadata if on[name] != off[name]]
+    if mismatched:
+        return {
+            "status": "error", "error_code": "incompatible_field_pair_metadata",
+            "mismatched": mismatched,
+        }
+    if on["point_fingerprint_sha256"] == off["point_fingerprint_sha256"]:
+        return {"status": "error", "error_code": "field_pair_points_not_distinct"}
+    coordinate_names = ("x", "y", "z")
+    if any(
+        on[name].shape != off[name].shape or not np.array_equal(on[name], off[name])
+        for name in coordinate_names
+    ):
+        return {"status": "error", "error_code": "field_pair_grid_mismatch"}
+
+    on_field = on["field"]
+    off_field = off["field"]
+    if on_field.shape != off_field.shape or on_field.ndim != 1 or not on_field.size:
+        return {"status": "error", "error_code": "field_pair_value_shape_mismatch"}
+    if not (
+        np.isfinite(on_field).all() and np.isfinite(off_field).all()
+        and np.all(on_field >= 0) and np.all(off_field >= 0)
+    ):
+        return {"status": "error", "error_code": "field_pair_nonfinite_values"}
+
+    shared_min = float(min(np.min(on_field), np.min(off_field)))
+    shared_max = float(max(np.max(on_field), np.max(off_field)))
+    off_max = float(np.max(off_field))
+    off_mean_square = float(np.mean(np.square(off_field)))
+    pair_id = f"field-pair-{uuid.uuid4().hex[:16]}"
+    out.mkdir(parents=True, exist_ok=True)
+    final_path = out / f"{pair_id}.npz"
+    temp_path = out / f".{pair_id}.{uuid.uuid4().hex[:8]}.tmp.npz"
+    try:
+        np.savez_compressed(
+            temp_path,
+            x=on["x"], y=on["y"], z=on["z"],
+            on_field=on_field, off_field=off_field,
+            on_field_complex=on["field_complex"],
+            off_field_complex=off["field_complex"],
+            shared_vmin=np.array(shared_min), shared_vmax=np.array(shared_max),
+            on_artifact_sha256=np.array(on_sha256), off_artifact_sha256=np.array(off_sha256),
+            pairing_config_sha256=np.array(on["pairing_config_sha256"]),
+            field_sampling_sha256=np.array(on["field_sampling_sha256"]),
+            on_point_fingerprint_sha256=np.array(on["point_fingerprint_sha256"]),
+            off_point_fingerprint_sha256=np.array(off["point_fingerprint_sha256"]),
+        )
+        with temp_path.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temp_path, final_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    result = {
+        "status": "ok",
+        "pair_schema": "reticolo_field_pair/1",
+        "pair_id": pair_id,
+        "artifact_path": str(final_path),
+        "artifact_sha256": _sha256_path(final_path),
+        "on_artifact_sha256": on_sha256,
+        "off_artifact_sha256": off_sha256,
+        "pairing_config_sha256": on["pairing_config_sha256"],
+        "field_sampling_sha256": on["field_sampling_sha256"],
+        "on_point_fingerprint_sha256": on["point_fingerprint_sha256"],
+        "off_point_fingerprint_sha256": off["point_fingerprint_sha256"],
+        "point_count": int(on_field.size),
+        "shared_limits": [shared_min, shared_max],
+        "max_abs_ratio_on_over_off": (
+            float(np.max(on_field)) / off_max if off_max > 0 else None
+        ),
+        "mean_square_ratio_on_over_off": (
+            float(np.mean(np.square(on_field))) / off_mean_square
+            if off_mean_square > 0 else None
+        ),
+        "visual_review_state": "visual_review_required",
+        "claim_scope": "numerical_pair_only_no_mode_classification",
+    }
+    summary_path = out / f"{pair_id}_summary.json"
+    result["summary_path"] = str(summary_path)
+    _atomic_write_json(summary_path, result)
+    return result
+
+
+def _resolve_input_artifact(path: str | Path) -> Path:
+    root = ARTIFACT_ROOT.resolve(strict=True)
+    candidate = Path(path).resolve(strict=True)
+    if candidate.parent != root and root not in candidate.parents:
+        raise ValueError("input artifact must stay inside RETICOLO_ARTIFACT_DIR")
+    if candidate.suffix.casefold() != ".npz" or not candidate.is_file():
+        raise ValueError("input artifact must be an existing NPZ file")
+    if candidate.stat().st_size > HARD_MAX_FIELD_ARTIFACT_BYTES:
+        raise ValueError("input field artifact exceeds the hard size cap")
+    return candidate
+
+
+def _load_field_artifact(path: Path) -> dict[str, Any]:
+    array_names = {"x", "y", "z", "field", "field_complex"}
+    metadata_names = {
+        "field_schema", "collector_source_sha256", "reticolo_source_sha256",
+        "physical_config_sha256", "pairing_config_sha256",
+        "point_fingerprint_sha256", "field_sampling_sha256", "field_request_sha256",
+    }
+    try:
+        with zipfile.ZipFile(path) as zipped:
+            if sum(info.file_size for info in zipped.infolist()) > HARD_MAX_FIELD_UNCOMPRESSED_BYTES:
+                raise ValueError("field artifact exceeds the uncompressed size cap")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("field artifact is not a valid NPZ archive") from exc
+    with np.load(path, allow_pickle=False) as archive:
+        missing = sorted((array_names | metadata_names) - set(archive.files))
+        if missing:
+            raise ValueError(f"field artifact is missing entries {missing}")
+        result = {name: np.array(archive[name]) for name in array_names}
+        for name in metadata_names:
+            value = archive[name]
+            if value.shape != ():
+                raise ValueError(f"field metadata {name} must be scalar")
+            result[name] = str(value.item())
+    lengths = {result[name].size for name in array_names}
+    if len(lengths) != 1:
+        raise ValueError("field artifact arrays have inconsistent lengths")
+    point_count = next(iter(lengths))
+    if not 1 <= point_count <= HARD_MAX_FIELD_POINTS:
+        raise ValueError("field artifact point count exceeds the hard bound")
+    if any(result[name].ndim != 1 for name in array_names):
+        raise ValueError("field artifact arrays must be one-dimensional")
+    if not all(
+        np.isfinite(result[name].real).all() and np.isfinite(result[name].imag).all()
+        for name in array_names
+    ):
+        raise ValueError("field artifact arrays must be finite")
+    if np.any(result["field"] < 0) or not np.allclose(
+        result["field"], np.abs(result["field_complex"]), rtol=1e-12, atol=1e-15,
+    ):
+        raise ValueError("field magnitude is inconsistent with field_complex")
+    return result
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _resolve_output_dir(output_dir: str | Path | None) -> Path | None:

@@ -35,7 +35,7 @@ from .sweep import run_sweep
 from .config_hash import compute_config_hash, normalize_textures
 from . import jobs
 from .convergence import run_convergence
-from .field_export import export_field
+from .field_export import assemble_field_pair, export_field
 from .capabilities import capability_receipt
 from .resources import ResourcePolicy, evaluate_admission, sample_resources
 
@@ -798,6 +798,29 @@ def reticolo_field_export(
         z_points_per_layer=z_points_per_layer,
         output_dir=output_dir or None,
         config_label=config_label,
+    )
+
+
+@mcp.tool()
+def reticolo_field_pair(
+    on_artifact: str,
+    off_artifact: str,
+    on_sha256: str,
+    off_sha256: str,
+    output_dir: str,
+) -> dict:
+    """Assemble two existing field artifacts on one exact grid with shared limits."""
+    if not EXPERIMENTAL_ENABLED:
+        return {
+            "status": "error", "error_code": "experimental_tool_disabled",
+            "detail": "set RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host",
+        }
+    return assemble_field_pair(
+        on_artifact=on_artifact,
+        off_artifact=off_artifact,
+        on_sha256=on_sha256,
+        off_sha256=off_sha256,
+        output_dir=output_dir,
     )
 
 

@@ -29,6 +29,7 @@ TOOL_MATURITY = {
     "job_resume": "experimental",
     "reticolo_convergence": "experimental_not_release_accepted",
     "reticolo_field_export": "experimental_verified_uniform_te_field_artifact",
+    "reticolo_field_pair": "experimental_solver_free_paired_field_assembler",
 }
 
 

@@ -443,6 +443,14 @@ class TestExperimentalGates:
         )
         assert result["error_code"] == "experimental_tool_disabled"
 
+    def test_field_pair_disabled_by_default(self):
+        result = server.reticolo_field_pair(
+            on_artifact="on.npz", off_artifact="off.npz",
+            on_sha256="1" * 64, off_sha256="2" * 64,
+            output_dir="pairs",
+        )
+        assert result["error_code"] == "experimental_tool_disabled"
+
     def test_field_disabled_by_default(self):
         result = server.reticolo_field_export(
             wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],

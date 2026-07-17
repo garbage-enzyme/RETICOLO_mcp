@@ -46,6 +46,10 @@ def test_field_and_convergence_are_not_marked_verified():
         "uniform TE artifact" in limitation and "paired mode" in limitation
         for limitation in receipt["known_limitations"]
     )
+    assert (
+        receipt["tool_maturity"]["reticolo_field_pair"]
+        == "experimental_solver_free_paired_field_assembler"
+    )
 
 
 def test_lifecycle_tools_are_promoted_after_real_receipts():
