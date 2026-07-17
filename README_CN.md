@@ -57,8 +57,8 @@ python -m reticolo_mcp.server
 | `reticolo_start` / `reticolo_stop` | 已通过真实生命周期验收 | 三轮清理、启动回滚与 >90 s heartbeat ownership 均通过 |
 | `reticolo_solve_point` | 已验证 TE/TM 单点 translation | 正入射、signed-angle 解析/direct fixtures 与 patterned TE |
 | `reticolo_sweep` | 实验性、默认禁用 | 旧同步扫描；优先使用持久化 job |
-| `job_submit/status/tail/cancel/resume` | 实验性 | 真实重启验收尚未执行 |
-| `reticolo_convergence` | 实验性 | 尚不能作为支路收敛证据 |
+| `job_submit/status/tail/cancel/resume` | 实验性 | 真实 restart/resume 与安全边界 cancel 收据已通过；接口仍为实验性 |
+| `reticolo_convergence` | 实验性 | MCP 执行尚未通过发布验收；外部归档证据不能提升其成熟度 |
 | `reticolo_field_export` | 当前 V10 路径不可用 | 当前 retchamp 基准会失败 |
 
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
@@ -100,6 +100,13 @@ python scripts\verify_installed_transport.py `
 `--experimental` 仅用于单独声明的 restart-bound profile 检查；随后必须不带该参数
 再次重启并验证默认 profile。
 
+可使用 `scripts\audit_external_evidence.py` 在不启动 MATLAB 的情况下审计归档收敛
+数据。审计先用 SHA-256 与精确配置身份绑定 manifest、脚本、逐点 CSV 和 summary CSV；
+提供 `--convergence-group-column` 及三个 tolerance 参数后，再从 raw rows 重建每个峰、
+双侧 half-prominence FWHM、Q 和相邻阶 center/A/width 门槛。Provenance 可以通过而科学
+验收以退出码 `2` 结束；这种 receipt 是有界 residual，不是执行崩溃，也不能提升工具
+capability。
+
 | 阶段 | 证据 |
 |---|---|
 | G0 — 引擎生命周期 | 启动 → 健康检查 → 停止，无 MATLAB 进程泄漏，无临时文件残留 |
@@ -115,9 +122,15 @@ python scripts\verify_installed_transport.py `
 | V2 损耗平板 | raw R/T/A_balance = 0.0030686604 / 0.8847234795 / 0.1122078601；解析误差 < 3e-16 |
 | V2 patterned translation | 三组 direct/wrapper ledger 全部 exact；Sun M5 raw R/T/A_balance = 0.8439529179 / 2.2009066e-6 / 0.1560448812 |
 | V2 staged resources | nn=9/15/21/31 全部 green/passive；耗时 0.936/5.616/28.800/227.452 s；lease 全程保持 |
+| V2 durable restart/resume | host 退出后 worker 保持运行；精确首点恢复为无重复的两行 passive 结果 |
+| V2 安全边界 cancel | 飞行中的 nn=21 点先持久化；下一点 admission 前停止并证明清理完成 |
+| 外部 Xu 收敛审计 | 1346/1346 行完成绑定；7/7 组重建 center/A/FWHM 收敛；不属于 MCP 执行 |
+| 外部 Sun 收敛审计 | 170/170 行 provenance 通过；summary 缺少 FWHM 证据，科学契约被拒绝 |
 
 ## 已知限制
 
+- **收敛：** MCP convergence 路径仍为实验性且默认禁用。归档 Xu 证据通过了独立的
+  三指标重建；归档 Sun summary 缺少 width 契约。两者都不能提升 MCP 执行成熟度。
 - **场导出（`retchamp`）：** RETICOLO V10 `retapod`/`retchamp` 在均匀结构上因
   `imag(apod)` 类型错误崩溃。此为 V10 上游 bug，在找到变通方案或 V10 修复前场导出
   未经验证。
@@ -156,6 +169,7 @@ reticolo-mcp/
 │   ├── jobs.py          # 持久作业存储（spec/state/events）
 │   ├── worker.py        # 独立工作进程
 │   ├── convergence.py   # 渐进谐波阶数收敛
+│   ├── evidence_audit.py # 无需求解器的归档证据与 claim 重建
 │   ├── field_export.py  # retchamp 场数据导出
 │   ├── schema.py        # Pydantic 材料/几何数据模型
 │   ├── config_hash.py   # 规范 SHA-256 配置标识

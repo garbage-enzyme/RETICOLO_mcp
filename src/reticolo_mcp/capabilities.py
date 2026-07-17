@@ -52,7 +52,10 @@ def capability_receipt(tool_names: Iterable[str]) -> dict[str, Any]:
         "experimental_enabled": EXPERIMENTAL_ENABLED,
         "matlab_imported": "matlab" in sys.modules or "matlab.engine" in sys.modules,
         "known_limitations": [
-            "convergence is experimental and not branch-convergence accepted",
+            (
+                "convergence remains experimental; archived external evidence "
+                "does not promote MCP execution maturity"
+            ),
             "RETICOLO V10 field export fails on the current retchamp fixture",
         ],
     }

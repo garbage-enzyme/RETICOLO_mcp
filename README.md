@@ -56,8 +56,8 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `reticolo_start` / `reticolo_stop` | Verified real lifecycle | Three clean cycles, rollback, and >90 s heartbeat ownership passed |
 | `reticolo_solve_point` | Verified TE/TM one-point translation | Normal and signed-angle analytical/direct fixtures plus patterned TE |
 | `reticolo_sweep` | Experimental, disabled by default | Legacy synchronous sweep; prefer durable jobs |
-| `job_submit/status/tail/cancel/resume` | Experimental | Durable controls; real restart gate pending |
-| `reticolo_convergence` | Experimental | Not accepted as branch-aware convergence evidence |
+| `job_submit/status/tail/cancel/resume` | Experimental | Real restart/resume and safe-boundary cancellation receipts passed; interface remains experimental |
+| `reticolo_convergence` | Experimental | MCP execution is not release accepted; external archived evidence cannot promote it |
 | `reticolo_field_export` | Unavailable on failing V10 path | Current retchamp fixture fails upstream |
 
 Use `reticolo_capabilities` as the live maturity and deployment receipt. Historical
@@ -100,6 +100,14 @@ fresh child process. It fails if the installed identity/profile differs, MATLAB 
 imported during discovery, or the MATLAB PID set changes. Use `--experimental` only
 for a separately declared restart-bound profile check, then restart without it.
 
+Archived convergence data can be audited without MATLAB by using
+`scripts\audit_external_evidence.py`. The audit first binds the manifest, script,
+point CSV, and summary CSV by SHA-256 and exact configuration identity. With
+`--convergence-group-column` and all three tolerance arguments, it then reconstructs
+each peak, two-sided half-prominence FWHM, Q, and adjacent-order center/A/width gate
+from raw rows. Provenance can pass while scientific acceptance returns exit code `2`;
+such a receipt is a bounded residual, not an execution failure or capability promotion.
+
 | Gate | Evidence |
 |---|---|
 | G0 — Engine lifecycle | Start → health → stop, no MATLAB leak, no orphans |
@@ -115,9 +123,17 @@ for a separately declared restart-bound profile check, then restart without it.
 | V2 lossy slab | raw R/T/A_balance = 0.0030686604 / 0.8847234795 / 0.1122078601; analytical errors < 3e-16 |
 | V2 patterned translation | Three direct/wrapper ledgers exact; Sun M5 raw R/T/A_balance = 0.8439529179 / 2.2009066e-6 / 0.1560448812 |
 | V2 staged resources | nn=9/15/21/31 all green and passive; solve times 0.936/5.616/28.800/227.452 s; exact lease retained |
+| V2 durable restart/resume | Host exit preserved worker; exact first point resumed to a two-row passive result with no duplicate |
+| V2 safe-boundary cancel | In-flight nn=21 point persisted; cancellation stopped before the next admission and cleanup was proven |
+| External Xu convergence audit | 1346/1346 rows bound; 7/7 groups reconstruct center/A/FWHM convergence; not MCP execution |
+| External Sun convergence audit | 170/170 rows pass provenance; scientific contract rejected because the summary lacks FWHM evidence |
 
 ## Known limitations
 
+- **Convergence:** the MCP convergence path remains experimental and disabled by
+  default. Archived Xu evidence passes an independent three-metric reconstruction,
+  while the archived Sun summary lacks the width contract. Neither external result
+  promotes MCP execution maturity.
 - **Field export (`retchamp`):** RETICOLO V10 `retapod`/`retchamp` crashes on uniform
   structures with an `imag(apod)` type error. This is an upstream V10 bug; field export
   is unverified until a workaround or V10 patch is available.
@@ -157,6 +173,7 @@ reticolo-mcp/
 │   ├── jobs.py          # Durable job store (spec/state/events)
 │   ├── worker.py        # Detached worker process
 │   ├── convergence.py   # Progressive harmonic convergence
+│   ├── evidence_audit.py # Solver-free archived evidence and claim reconstruction
 │   ├── field_export.py  # retchamp field export
 │   ├── schema.py        # Pydantic models for materials/geometry
 │   ├── config_hash.py   # Canonical SHA-256 config identity

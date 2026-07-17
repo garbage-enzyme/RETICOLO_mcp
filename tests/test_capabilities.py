@@ -31,7 +31,14 @@ def test_unknown_tool_is_not_silently_promoted():
 def test_field_and_convergence_are_not_marked_verified():
     receipt = reticolo_capabilities()
     assert receipt["tool_maturity"]["reticolo_field_export"].startswith("unavailable")
-    assert receipt["tool_maturity"]["reticolo_convergence"].startswith("experimental")
+    assert (
+        receipt["tool_maturity"]["reticolo_convergence"]
+        == "experimental_not_release_accepted"
+    )
+    assert any(
+        "external evidence" in limitation and "does not promote" in limitation
+        for limitation in receipt["known_limitations"]
+    )
 
 
 def test_lifecycle_tools_are_promoted_after_real_receipts():
