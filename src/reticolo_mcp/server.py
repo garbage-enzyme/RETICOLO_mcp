@@ -767,7 +767,11 @@ def reticolo_field_export(
     component: str = "normE",
     slice_axis: str = "z",
     slice_value: float = 0.0,
+    slice_tol: float = 1e-6,
     max_points: int = 500_000,
+    x_points: int = 41,
+    y_points: int = 41,
+    z_points_per_layer: int = 21,
     output_dir: str = "",
     config_label: str = "",
 ) -> dict:
@@ -788,8 +792,10 @@ def reticolo_field_export(
         textures=textures, profil=profil,
         polarization=polarization,
         component=component,
-        slice_axis=slice_axis, slice_value=slice_value,
+        slice_axis=slice_axis, slice_value=slice_value, slice_tol=slice_tol,
         max_points=max_points,
+        x_points=x_points, y_points=y_points,
+        z_points_per_layer=z_points_per_layer,
         output_dir=output_dir or None,
         config_label=config_label,
     )

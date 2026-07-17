@@ -453,7 +453,7 @@ class TestExperimentalGates:
     def test_enabled_field_still_validates_before_engine(self, monkeypatch):
         monkeypatch.setattr(server, "EXPERIMENTAL_ENABLED", True)
         result = server.reticolo_field_export(
-            wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
+            wl_um=5.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]}, component="bad",
         )
         assert result["error_code"] == "invalid_field_component"
