@@ -9,7 +9,7 @@ from pathlib import Path
 from reticolo_mcp.durable_io import atomic_write_bytes
 from reticolo_mcp.evidence_audit import (
     audit_external_evidence_bundle,
-    audit_peak_convergence_claims,
+    evaluate_peak_convergence_contract,
 )
 
 
@@ -42,7 +42,7 @@ def main() -> int:
     if args.convergence_group_column:
         if any(value is None for value in convergence_values):
             parser.error("all three convergence tolerances are required")
-        receipt["scientific_convergence_audit"] = audit_peak_convergence_claims(
+        receipt["scientific_convergence_audit"] = evaluate_peak_convergence_contract(
             points_path=args.points,
             summary_path=args.summary,
             group_column=args.convergence_group_column,
@@ -51,12 +51,17 @@ def main() -> int:
             tol_fwhm_relative=args.tol_fwhm_relative,
             max_rows=args.max_rows,
         )
+        receipt["scientific_acceptance"] = receipt[
+            "scientific_convergence_audit"
+        ]["accepted"]
+        if not receipt["scientific_acceptance"]:
+            receipt["status"] = "provenance_accepted_scientific_not_accepted"
     elif any(value is not None for value in convergence_values):
         parser.error("--convergence-group-column is required with tolerances")
     payload = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode("utf-8")
     atomic_write_bytes(args.output, payload)
     print(json.dumps(receipt, indent=2, sort_keys=True))
-    return 0
+    return 0 if receipt.get("scientific_acceptance", True) else 2
 
 
 if __name__ == "__main__":

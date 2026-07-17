@@ -11,8 +11,10 @@ import pytest
 
 from reticolo_mcp.evidence_audit import (
     ExternalEvidenceError,
+    ScientificEvidenceError,
     audit_external_evidence_bundle,
     audit_peak_convergence_claims,
+    evaluate_peak_convergence_contract,
 )
 
 
@@ -219,3 +221,33 @@ def test_nonincreasing_summary_order_is_rejected(tmp_path):
         writer.writerows(rows)
     with pytest.raises(ExternalEvidenceError, match="strictly increasing"):
         _audit_convergence(points, summary)
+
+
+def test_missing_scientific_summary_columns_have_stable_nonacceptance(tmp_path):
+    points, summary = _convergence_fixture(tmp_path)
+    rows = list(csv.DictReader(summary.read_text(encoding="utf-8").splitlines()))
+    fields = [field for field in rows[0] if field != "FWHM_um"]
+    with summary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    result = evaluate_peak_convergence_contract(
+        points_path=points,
+        summary_path=summary,
+        group_column="density_label",
+        tol_center_nm=10.0,
+        tol_absorption=0.02,
+        tol_fwhm_relative=0.1,
+    )
+    assert result["accepted"] is False
+    assert result["status"] == "scientific_contract_not_satisfied"
+    assert result["error_code"] == "scientific_summary_schema_invalid"
+    assert "FWHM_um" in result["detail"]
+
+
+def test_scientific_schema_exception_exposes_code(tmp_path):
+    points, summary = _convergence_fixture(tmp_path)
+    summary.write_text("density_label,nn\nn1,19\n", encoding="utf-8")
+    with pytest.raises(ScientificEvidenceError) as caught:
+        _audit_convergence(points, summary)
+    assert caught.value.error_code == "scientific_summary_schema_invalid"

@@ -20,6 +20,14 @@ class ExternalEvidenceError(ValueError):
     """Raised when an archived evidence bundle is incomplete or inconsistent."""
 
 
+class ScientificEvidenceError(ExternalEvidenceError):
+    """A coded failure to satisfy the archived scientific evidence schema."""
+
+    def __init__(self, error_code: str, detail: str):
+        super().__init__(detail)
+        self.error_code = error_code
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -132,13 +140,18 @@ def audit_peak_convergence_claims(
     if max_pair_order_gap <= 0 or max_rows <= 0:
         raise ExternalEvidenceError("convergence bounds must be positive")
 
-    point_rows = _load_csv_rows(
-        Path(points_path),
-        {
-            group_column, *point_order_columns, "wl_um", "R", "T", "status",
-        },
-        max_rows=max_rows,
-    )
+    try:
+        point_rows = _load_csv_rows(
+            Path(points_path),
+            {
+                group_column, *point_order_columns, "wl_um", "R", "T", "status",
+            },
+            max_rows=max_rows,
+        )
+    except ExternalEvidenceError as exc:
+        raise ScientificEvidenceError(
+            "scientific_points_schema_invalid", str(exc),
+        ) from exc
     point_fields = set(point_rows[0])
     absorption_column = "A_balance" if "A_balance" in point_fields else "A"
     if absorption_column not in point_fields:
@@ -150,9 +163,14 @@ def audit_peak_convergence_claims(
         "peak_state", "width_state", "local_peak_count", "prev_shift_nm",
         "prev_A_change", "prev_FWHM_rel_change", "pair_converged",
     }
-    summary_rows = _load_csv_rows(
-        Path(summary_path), summary_required, max_rows=max_rows,
-    )
+    try:
+        summary_rows = _load_csv_rows(
+            Path(summary_path), summary_required, max_rows=max_rows,
+        )
+    except ExternalEvidenceError as exc:
+        raise ScientificEvidenceError(
+            "scientific_summary_schema_invalid", str(exc),
+        ) from exc
 
     spectra: dict[tuple[str, int], dict[float, tuple[float, float, float]]] = {}
     for row_number, row in enumerate(point_rows, start=2):
@@ -285,6 +303,30 @@ def audit_peak_convergence_claims(
             "max_pair_order_gap": max_pair_order_gap,
         },
     }
+
+
+def evaluate_peak_convergence_contract(**kwargs: Any) -> dict[str, Any]:
+    """Return a stable acceptance or non-acceptance result for a scientific audit."""
+    try:
+        result = audit_peak_convergence_claims(**kwargs)
+    except ScientificEvidenceError as exc:
+        return {
+            "status": "scientific_contract_not_satisfied",
+            "accepted": False,
+            "error_code": exc.error_code,
+            "detail": str(exc)[:500],
+        }
+    except ExternalEvidenceError as exc:
+        return {
+            "status": "scientific_contract_not_satisfied",
+            "accepted": False,
+            "error_code": "scientific_claim_mismatch",
+            "detail": str(exc)[:500],
+        }
+    result["accepted"] = result["status"] == "accepted"
+    if not result["accepted"]:
+        result["error_code"] = "convergence_not_reached"
+    return result
 def _bounded_file(path: str | Path, max_bytes: int) -> Path:
     candidate = Path(path)
     try:
