@@ -51,6 +51,7 @@ def _bundle(tmp_path: Path) -> dict[str, Path]:
 
 
 def _audit(paths: dict[str, Path], **kwargs):
+    kwargs.setdefault("balance_tolerance", 1e-9)
     return audit_external_evidence_bundle(
         manifest_path=paths["manifest"],
         points_path=paths["points"],
@@ -112,6 +113,12 @@ def test_artifact_size_bound_is_enforced(tmp_path):
         _audit(paths, max_artifact_bytes=10)
 
 
+@pytest.mark.parametrize("value", [-1.0, float("inf"), True, "1e-9"])
+def test_balance_tolerance_must_be_explicit_finite_real(tmp_path, value):
+    with pytest.raises(ExternalEvidenceError, match="balance_tolerance"):
+        _audit(_bundle(tmp_path), balance_tolerance=value)
+
+
 def _convergence_fixture(tmp_path: Path) -> tuple[Path, Path]:
     points = tmp_path / "convergence_points.csv"
     point_fields = [
@@ -171,6 +178,8 @@ def _audit_convergence(points: Path, summary: Path):
         tol_center_nm=10.0,
         tol_absorption=0.02,
         tol_fwhm_relative=0.1,
+        max_pair_order_gap=2,
+        numeric_tolerance=1e-9,
     )
 
 
@@ -238,6 +247,8 @@ def test_missing_scientific_summary_columns_have_stable_nonacceptance(tmp_path):
         tol_center_nm=10.0,
         tol_absorption=0.02,
         tol_fwhm_relative=0.1,
+        max_pair_order_gap=2,
+        numeric_tolerance=1e-9,
     )
     assert result["accepted"] is False
     assert result["status"] == "scientific_contract_not_satisfied"

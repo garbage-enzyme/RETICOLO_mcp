@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -18,7 +19,9 @@ from typing import Any, Callable
 
 CSV_FIELDS = [
     "wl_um", "nn_x", "nn_y", "R", "T", "A_balance",
-    "passive", "solve_time_s", "status", "error",
+    "passive", "passivity_tolerance", "passivity_policy_name",
+    "passivity_policy_source", "passivity_evidence_kind", "solve_time_s",
+    "status", "error",
     "config_hash", "config_id", "polarization", "timestamp",
 ]
 
@@ -31,6 +34,7 @@ def run_sweep(
     D: float | list[float],
     textures: list[Any],
     profil: dict[str, list],
+    passivity_tolerance: float,
     point_textures: list[list[Any]] | None = None,
     polarization: int = 1,
     config_id: str = "",
@@ -51,6 +55,7 @@ def run_sweep(
         point_textures: Optional texture definitions aligned one-to-one with
                         ``wls_um`` for dispersive point schedules.
         profil: Layer thickness profile.
+        passivity_tolerance: Caller-selected finite nonnegative R/T/A bound.
         polarization: 1 for TE, -1 for TM.
         config_id: Human-readable label (optional).
         config_hash: Canonical SHA-256 of physical inputs.
@@ -61,6 +66,14 @@ def run_sweep(
     Returns:
         {total, solved, skipped, errors, csv_path, runtime_s, config_hash}
     """
+    if (
+        isinstance(passivity_tolerance, bool)
+        or not isinstance(passivity_tolerance, (int, float))
+        or not math.isfinite(float(passivity_tolerance))
+        or float(passivity_tolerance) < 0
+    ):
+        raise ValueError("passivity_tolerance must be finite and nonnegative")
+    passivity_tolerance = float(passivity_tolerance)
     csv_path = Path(csv_path)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -76,13 +89,16 @@ def run_sweep(
     )
 
     file_exists = csv_path.exists()
-    if file_exists and config_hash:
-        validation_error = _validate_existing_csv(csv_path, config_hash)
+    if file_exists:
+        validation_error = _validate_existing_csv(
+            csv_path, config_hash, passivity_tolerance,
+        )
         if validation_error:
             return {
                 "total": len(wls_um), "solved": 0, "skipped": 0,
                 "errors": 0, "csv_path": str(csv_path),
                 "runtime_s": 0, "config_hash": config_hash,
+                "passivity_tolerance": passivity_tolerance,
                 "status": "error", "error": validation_error,
             }
 
@@ -95,13 +111,16 @@ def run_sweep(
     if not pending:
         return {"total": len(wls_um), "solved": 0, "skipped": len(skipped),
                 "errors": 0, "csv_path": str(csv_path), "runtime_s": 0,
-                "config_hash": config_hash, "status": "all_skipped"}
+                "config_hash": config_hash,
+                "passivity_tolerance": passivity_tolerance,
+                "status": "all_skipped"}
 
     if _cancel_requested(should_cancel):
         return {
             "total": len(wls_um), "solved": 0, "skipped": len(skipped),
             "errors": 0, "csv_path": str(csv_path), "runtime_s": 0,
             "config_hash": config_hash, "status": "cancel_requested",
+            "passivity_tolerance": passivity_tolerance,
             "cancel_observed": True,
         }
 
@@ -129,8 +148,11 @@ def run_sweep(
                     _wavelength_key(wl), textures,
                 ),
                 profil=profil,
+                passivity_tolerance=passivity_tolerance,
                 polarization=polarization, config_id=config_id,
             )
+
+            policy = result.get("passivity_policy", {})
 
             writer.writerow([
                 format(float(wl), ".17g"),
@@ -140,6 +162,10 @@ def run_sweep(
                 f"{result.get('T', 0):.12f}" if result["status"] == "ok" else "",
                 f"{result.get('A_balance', 0):.12f}" if result["status"] == "ok" else "",
                 str(result.get("passive", "")),
+                format(passivity_tolerance, ".17g"),
+                policy.get("name", "bounded_rta_v1"),
+                policy.get("source", "caller_supplied"),
+                policy.get("evidence_kind", "policy_outcome_not_independent_closure"),
                 f"{float(result.get('solve_time_s', time.time() - row_time)):.3f}",
                 result["status"],
                 result.get("error", ""),
@@ -169,6 +195,7 @@ def run_sweep(
         "csv_path": str(csv_path),
         "runtime_s": round(time.time() - t0, 1),
         "config_hash": config_hash,
+        "passivity_tolerance": passivity_tolerance,
         "status": (
             "cancel_requested" if cancel_observed
             else "resource_refused" if admission_stop
@@ -296,7 +323,9 @@ def _read_first_config_hash(csv_path: Path) -> str | None:
     return None
 
 
-def _validate_existing_csv(csv_path: Path, config_hash: str) -> str | None:
+def _validate_existing_csv(
+    csv_path: Path, config_hash: str, passivity_tolerance: float,
+) -> str | None:
     """Validate the complete existing result file before any append/resume."""
     try:
         with open(csv_path, newline="", encoding="utf-8") as f:
@@ -305,13 +334,30 @@ def _validate_existing_csv(csv_path: Path, config_hash: str) -> str | None:
                 return "invalid or incompatible CSV header"
             for line_number, row in enumerate(reader, start=2):
                 row_hash = row.get("config_hash", "")
-                if not row_hash:
+                if config_hash and not row_hash:
                     return f"missing config_hash at row {line_number}"
-                if row_hash != config_hash:
+                if config_hash and row_hash != config_hash:
                     return (
                         f"config_hash mismatch at row {line_number}: "
                         f"existing={row_hash} requested={config_hash}"
                     )
+                try:
+                    row_tolerance = float(row["passivity_tolerance"])
+                except (KeyError, TypeError, ValueError):
+                    return f"invalid passivity_tolerance at row {line_number}"
+                if row_tolerance != passivity_tolerance:
+                    return (
+                        f"passivity_tolerance mismatch at row {line_number}: "
+                        f"existing={row_tolerance} requested={passivity_tolerance}"
+                    )
+                if row.get("passivity_policy_name") != "bounded_rta_v1":
+                    return f"invalid passivity policy name at row {line_number}"
+                if row.get("passivity_policy_source") != "caller_supplied":
+                    return f"invalid passivity policy source at row {line_number}"
+                if row.get("passivity_evidence_kind") != (
+                    "policy_outcome_not_independent_closure"
+                ):
+                    return f"invalid passivity evidence kind at row {line_number}"
     except (OSError, csv.Error) as exc:
         return f"cannot validate existing CSV: {type(exc).__name__}"
     return None

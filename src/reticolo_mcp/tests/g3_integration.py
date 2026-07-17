@@ -27,6 +27,7 @@ def main():
         D=[1.0], nn=[3, 3],
         textures=[1.0, 1.5, 1.0],
         profil={"heights": [0.0, 0.5, 0.0], "indices": [1, 2, 3]},
+        passivity_tolerance=1e-12,
         polarization=1,
         config_label="g3_test",
         mode="memory",

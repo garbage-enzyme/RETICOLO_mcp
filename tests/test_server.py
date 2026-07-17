@@ -133,6 +133,7 @@ class TestValidateSolveInputs:
         result = server.reticolo_solve_point(
             wl_um=1.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0, 1.5, 1.0],
             profil={"heights": [0, 0.5, 0], "indices": [1, 2, 3]},
+            passivity_tolerance=1e-12,
             polarization=-1, theta_deg=-5.0, azimuth_deg=30.0,
         )
         assert result == {"status": "ok"}
@@ -238,6 +239,7 @@ class TestPublicJobControls:
         spawn = MagicMock()
         monkeypatch.setattr(server, "_spawn_worker", spawn)
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
         )
@@ -248,6 +250,7 @@ class TestPublicJobControls:
         monkeypatch.setattr(server, "_spawn_worker", lambda _job_id: 4321)
         monkeypatch.setattr(server, "sample_resources", lambda **_kwargs: self._green_snapshot())
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
             resource_policy=self._resource_policy(),
@@ -262,6 +265,7 @@ class TestPublicJobControls:
         spawn = MagicMock()
         monkeypatch.setattr(server, "_spawn_worker", spawn)
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0, 1.1], D=[1.0], nn=[3, 3], textures=[1.0],
             point_textures=[[1.0]],
             profil={"heights": [0, 0], "indices": [1, 1]},
@@ -273,6 +277,7 @@ class TestPublicJobControls:
         spawn = MagicMock()
         monkeypatch.setattr(server, "_spawn_worker", spawn)
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0, 1.1], D=[1.0], nn=[3, 3], textures=[1.0],
             point_textures=[[1.0], []],
             profil={"heights": [0, 0], "indices": [1, 1]},
@@ -284,11 +289,13 @@ class TestPublicJobControls:
         spawn = MagicMock()
         monkeypatch.setattr(server, "_spawn_worker", spawn)
         invalid_base = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[],
             point_textures=[[1.0]],
             profil={"heights": [0, 0], "indices": [1, 1]},
         )
         duplicate = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0, 1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             point_textures=[[1.0], [1.1]],
             profil={"heights": [0, 0], "indices": [1, 1]},
@@ -306,6 +313,7 @@ class TestPublicJobControls:
             lambda _job_id: (_ for _ in ()).throw(OSError("cannot spawn")),
         )
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
             resource_policy=self._resource_policy(),
@@ -323,6 +331,7 @@ class TestPublicJobControls:
         )
         monkeypatch.setattr(server, "_spawn_worker", lambda _job_id: 4321)
         submitted = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
             resource_policy=self._resource_policy(),
@@ -346,6 +355,7 @@ class TestPublicJobControls:
         spawn = MagicMock()
         monkeypatch.setattr(server, "_spawn_worker", spawn)
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
         )
@@ -359,6 +369,7 @@ class TestPublicJobControls:
             runtime_free_fraction=0.5, remaining_wall_s=3600,
         ))
         result = server.job_submit(
+            passivity_tolerance=1e-12,
             wls_um=[1.0], D=[1.0], nn=[3, 3], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
             resource_policy=self._resource_policy(),
@@ -428,10 +439,26 @@ class TestPublicJobControls:
 
 
 class TestExperimentalGates:
+    def test_caller_owned_tolerances_are_required_in_tool_schemas(self):
+        tools = {
+            tool.name: set(tool.parameters.get("required", []))
+            for tool in server.mcp._tool_manager.list_tools()
+        }
+        assert "passivity_tolerance" in tools["reticolo_solve_point"]
+        assert "passivity_tolerance" in tools["reticolo_sweep"]
+        assert "passivity_tolerance" in tools["job_submit"]
+        assert {
+            "passivity_tolerance", "tol_wl", "tol_A", "tol_fwhm_nm",
+            "max_match_shift_um",
+        } <= tools["reticolo_convergence"]
+        assert "slice_tol" in tools["reticolo_field_export"]
+        assert "coordinate_tolerance_um" in tools["reticolo_field_pair"]
+
     def test_synchronous_sweep_disabled_by_default(self):
         result = server.reticolo_sweep(
             wls_um=[5.0], D=[1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12,
             csv_path="D:\\outside-runtime.csv",
         )
         assert result["error_code"] == "experimental_tool_disabled"
@@ -440,6 +467,8 @@ class TestExperimentalGates:
         result = server.reticolo_convergence(
             coarse_start=5.0, coarse_end=5.1, D=[1.0], nn=[5, 7],
             textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12, tol_wl=0.002, tol_A=0.01,
+            tol_fwhm_nm=1.0, max_match_shift_um=0.05,
         )
         assert result["error_code"] == "experimental_tool_disabled"
 
@@ -447,6 +476,7 @@ class TestExperimentalGates:
         result = server.reticolo_field_pair(
             on_artifact="on.npz", off_artifact="off.npz",
             on_sha256="1" * 64, off_sha256="2" * 64,
+            coordinate_tolerance_um=0.0,
             output_dir="pairs",
         )
         assert result["error_code"] == "experimental_tool_disabled"
@@ -455,6 +485,7 @@ class TestExperimentalGates:
         result = server.reticolo_field_export(
             wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            slice_tol=1e-6,
         )
         assert result["error_code"] == "experimental_tool_disabled"
 
@@ -462,7 +493,8 @@ class TestExperimentalGates:
         monkeypatch.setattr(server, "EXPERIMENTAL_ENABLED", True)
         result = server.reticolo_field_export(
             wl_um=5.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
-            profil={"heights": [0, 0], "indices": [1, 1]}, component="bad",
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            slice_tol=1e-6, component="bad",
         )
         assert result["error_code"] == "invalid_field_component"
 
@@ -473,5 +505,7 @@ class TestExperimentalGates:
             coarse_start=5.0, coarse_end=5.1, coarse_step=step,
             D=[1.0], nn=[5, 7], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12, tol_wl=0.002, tol_A=0.01,
+            tol_fwhm_nm=1.0, max_match_shift_um=0.05,
         )
         assert result["error_code"] == "invalid_convergence_step"

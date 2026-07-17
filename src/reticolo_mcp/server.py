@@ -173,6 +173,22 @@ def _validate_solve_inputs(
     return None
 
 
+def _validate_nonnegative_tolerance(value: object, name: str) -> dict | None:
+    """Validate a caller-owned scientific acceptance tolerance."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0
+    ):
+        return {
+            "status": "error",
+            "error_code": f"invalid_{name}",
+            "detail": f"{name} must be a finite nonnegative real number",
+        }
+    return None
+
+
 # ------------------------------------------------------------------
 # tools
 # ------------------------------------------------------------------
@@ -236,6 +252,7 @@ def reticolo_solve_point(
     nn: list[int],
     textures: list,
     profil: dict,
+    passivity_tolerance: float,
     polarization: int = 1,
     theta_deg: float = 0.0,
     azimuth_deg: float = 0.0,
@@ -250,6 +267,7 @@ def reticolo_solve_point(
         textures: Layer materials. Each entry is a refractive index (number)
                   or, for patterned layers, a list [bg_n, [cx,cy,dx,dy,n,k], ...].
         profil: {"heights": [z0, z1, ..., 0], "indices": [i0, i1, ...]}.
+        passivity_tolerance: Caller-selected finite nonnegative R/T/A bound.
         polarization: 1 for TE, -1 for TM.
         theta_deg: Signed incidence elevation in degrees (-90, 90).
         azimuth_deg: Incidence-plane azimuth in degrees [-360, 360].
@@ -265,6 +283,11 @@ def reticolo_solve_point(
     )
     if err:
         return err
+    tolerance_error = _validate_nonnegative_tolerance(
+        passivity_tolerance, "passivity_tolerance",
+    )
+    if tolerance_error:
+        return tolerance_error
 
     return engine.solve_point(
         wl_um=float(wl_um),
@@ -272,6 +295,7 @@ def reticolo_solve_point(
         nn=[int(nn[0]), int(nn[1])] if len(nn) >= 2 else [int(nn[0]), int(nn[0])],
         textures=textures,
         profil=profil,
+        passivity_tolerance=float(passivity_tolerance),
         polarization=int(polarization),
         theta_deg=float(theta_deg),
         azimuth_deg=float(azimuth_deg),
@@ -298,6 +322,7 @@ def reticolo_sweep(
     textures: list,
     profil: dict,
     csv_path: str,
+    passivity_tolerance: float,
     config_id: str = "",
     polarization: int = 1,
     resume: bool = True,
@@ -315,6 +340,7 @@ def reticolo_sweep(
         textures: Layer material definitions.
         profil: {"heights": [...], "indices": [...]}.
         csv_path: Absolute path for the output CSV file.
+        passivity_tolerance: Caller-selected finite nonnegative R/T/A bound.
         config_id: Provenance tag (max 128 chars). Resume matches on this.
         polarization: 1 for TE, -1 for TM.
         resume: If True, skip already-solved rows.
@@ -330,9 +356,6 @@ def reticolo_sweep(
                 "RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host"
             ),
         }
-    if engine.status()["status"] != "connected":
-        return {"status": "error", "error_code": "engine_not_started"}
-
     err = _validate_solve_inputs(
         wl_um=wls_um[0] if wls_um else 5.0,
         D=D, nn=nn, textures=textures, profil=profil,
@@ -340,6 +363,13 @@ def reticolo_sweep(
     )
     if err:
         return err
+    tolerance_error = _validate_nonnegative_tolerance(
+        passivity_tolerance, "passivity_tolerance",
+    )
+    if tolerance_error:
+        return tolerance_error
+    if engine.status()["status"] != "connected":
+        return {"status": "error", "error_code": "engine_not_started"}
 
     config_hash = compute_config_hash(
         schema_version="1",
@@ -374,6 +404,7 @@ def job_submit(
     nn: list[int],
     textures: list,
     profil: dict,
+    passivity_tolerance: float,
     point_textures: list | None = None,
     polarization: int = 1,
     config_label: str = "",
@@ -388,6 +419,11 @@ def job_submit(
     """
     if not wls_um:
         return {"status": "error", "error_code": "empty_job"}
+    tolerance_error = _validate_nonnegative_tolerance(
+        passivity_tolerance, "passivity_tolerance",
+    )
+    if tolerance_error:
+        return tolerance_error
     if len(wls_um) > MAX_JOB_POINTS:
         return {
             "status": "error", "error_code": "too_many_points",
@@ -462,6 +498,7 @@ def job_submit(
     attempt_id = uuid.uuid4().hex
     spec = jobs.create_job_spec(
         wls_um=wls_um, D=D, nn=nn, textures=textures, profil=profil,
+        passivity_tolerance=float(passivity_tolerance),
         point_textures=point_textures,
         polarization=polarization, config_label=config_label, mode=mode,
         resource_policy=parsed_policy.model_dump(mode="json"),
@@ -486,6 +523,7 @@ def job_submit(
 
     return {"status": "ok", "job_id": job_id,
             "config_hash": spec["config_hash"],
+            "passivity_tolerance": spec["passivity_tolerance"],
             "total_points": len(wls_um), "attempt_id": attempt_id,
             "launcher_pid": launch["launcher_pid"],
             "resource_decision_hash": decision["decision_hash"]}
@@ -506,6 +544,9 @@ def job_status(job_id: str) -> dict:
         "state": state,
         "total_points": len(spec["wls_um"]) if spec else 0,
         "config_hash": spec.get("config_hash", "") if spec else "",
+        "passivity_tolerance": (
+            spec.get("passivity_tolerance") if spec else None
+        ),
     }
 
 
@@ -689,14 +730,16 @@ def reticolo_convergence(
     nn: list[int],
     textures: list,
     profil: dict,
+    passivity_tolerance: float,
+    tol_wl: float,
+    tol_A: float,
+    tol_fwhm_nm: float,
+    max_match_shift_um: float,
     polarization: int = 1,
     config_label: str = "",
     coarse_step: float = 0.01,
     fine_half: float = 0.02,
     fine_step: float = 0.002,
-    tol_wl: float = 0.002,
-    tol_A: float = 0.01,
-    tol_fwhm_nm: float = 1.0,
 ) -> dict:
     """Run progressive harmonic convergence over Fourier orders.
 
@@ -712,9 +755,18 @@ def reticolo_convergence(
             "status": "error", "error_code": "experimental_tool_disabled",
             "detail": "set RETICOLO_MCP_ENABLE_EXPERIMENTAL=1 and restart the host",
         }
+    for value in (
+        passivity_tolerance, tol_wl, tol_A, tol_fwhm_nm,
+        max_match_shift_um,
+    ):
+        if _validate_nonnegative_tolerance(value, "convergence_tolerance"):
+            return {
+                "status": "error",
+                "error_code": "invalid_convergence_tolerance",
+            }
     numeric = [
         coarse_start, coarse_end, coarse_step, fine_half, fine_step,
-        tol_wl, tol_A, tol_fwhm_nm,
+        passivity_tolerance, tol_wl, tol_A, tol_fwhm_nm, max_match_shift_um,
     ]
     if not all(math.isfinite(float(value)) for value in numeric):
         return {"status": "error", "error_code": "nonfinite_convergence_input"}
@@ -722,8 +774,6 @@ def reticolo_convergence(
         return {"status": "error", "error_code": "invalid_convergence_range"}
     if coarse_step <= 0 or fine_half <= 0 or fine_step <= 0:
         return {"status": "error", "error_code": "invalid_convergence_step"}
-    if any(value < 0 for value in (tol_wl, tol_A, tol_fwhm_nm)):
-        return {"status": "error", "error_code": "invalid_convergence_tolerance"}
     coarse_points = math.floor((coarse_end - coarse_start) / coarse_step) + 1
     fine_points = math.floor((2 * fine_half) / fine_step) + 1
     if coarse_points > MAX_JOB_POINTS or fine_points > MAX_JOB_POINTS:
@@ -749,10 +799,12 @@ def reticolo_convergence(
         coarse_step=coarse_step,
         fine_half_width=fine_half, fine_step=fine_step,
         D=D, textures=textures, profil=profil,
+        passivity_tolerance=float(passivity_tolerance),
         polarization=polarization,
         output_dir=out_dir,
         config_label=config_label or "conv",
         tol_wl_um=tol_wl, tol_A=tol_A, tol_fwhm_nm=tol_fwhm_nm,
+        max_match_shift_um=max_match_shift_um,
     )
 
 
@@ -763,11 +815,11 @@ def reticolo_field_export(
     nn: list[int],
     textures: list,
     profil: dict,
+    slice_tol: float,
     polarization: int = 1,
     component: str = "normE",
     slice_axis: str = "z",
     slice_value: float = 0.0,
-    slice_tol: float = 1e-6,
     max_points: int = 500_000,
     x_points: int = 41,
     y_points: int = 41,
@@ -807,6 +859,7 @@ def reticolo_field_pair(
     off_artifact: str,
     on_sha256: str,
     off_sha256: str,
+    coordinate_tolerance_um: float,
     output_dir: str,
 ) -> dict:
     """Assemble two existing field artifacts on one exact grid with shared limits."""
@@ -820,6 +873,7 @@ def reticolo_field_pair(
         off_artifact=off_artifact,
         on_sha256=on_sha256,
         off_sha256=off_sha256,
+        coordinate_tolerance_um=coordinate_tolerance_um,
         output_dir=output_dir,
     )
 

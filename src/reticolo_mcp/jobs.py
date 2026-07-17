@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import ctypes
 import json
+import math
 import os
 import re
 import time
@@ -87,6 +88,7 @@ def _job_identity_payload(spec: dict[str, Any]) -> dict[str, Any]:
         "physical_config_hash": spec.get("physical_config_hash")
         or spec.get("config_hash", ""),
         "wls_um": spec.get("wls_um", []),
+        "passivity_tolerance": spec.get("passivity_tolerance"),
         "mode": spec.get("mode", "memory"),
         "resource_policy_hash": (
             (spec.get("resource_decision") or {}).get("policy_hash", "")
@@ -104,6 +106,7 @@ def create_job_spec(
     nn: list[int],
     textures: list[Any],
     profil: dict[str, list],
+    passivity_tolerance: float,
     point_textures: list[list[Any]] | None = None,
     polarization: int = 1,
     config_hash: str = "",
@@ -117,6 +120,13 @@ def create_job_spec(
         raise ValueError("point_textures must align one-to-one with wls_um")
     if point_textures is not None and len({format(float(wl), ".17g") for wl in wls_um}) != len(wls_um):
         raise ValueError("point_textures require unique wavelengths")
+    if (
+        isinstance(passivity_tolerance, bool)
+        or not isinstance(passivity_tolerance, (int, float))
+        or not math.isfinite(float(passivity_tolerance))
+        or float(passivity_tolerance) < 0
+    ):
+        raise ValueError("passivity_tolerance must be finite and nonnegative")
     spec: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "job_type": "staged_sweep",
@@ -132,6 +142,7 @@ def create_job_spec(
         "profil_heights": [float(v) for v in profil.get("heights", [])],
         "profil_indices": [int(v) for v in profil.get("indices", [])],
         "polarization": int(polarization),
+        "passivity_tolerance": float(passivity_tolerance),
         "config_hash": config_hash,
         "config_label": config_label,
         "mode": mode,

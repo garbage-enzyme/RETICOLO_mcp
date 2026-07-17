@@ -75,6 +75,7 @@ def main():
             result = eng.solve_point(
                 wl_um=wl, D=1.0, nn=[nn_val, nn_val],
                 textures=textures, profil=profil,
+                passivity_tolerance=1e-12,
                 polarization=1, config_id=f"g1_s{stage}",
             )
             mem = rss_mb(our_pid)

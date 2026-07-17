@@ -88,6 +88,7 @@ def main():
         nn=[3, 3],
         textures=[1.0, 1.0],  # air superstrate, air substrate
         profil={"heights": [0.0, 0.0], "indices": [1, 2]},
+        passivity_tolerance=1e-12,
         polarization=1,
         config_id="g0_smoke",
     )
@@ -113,6 +114,7 @@ def main():
         wl_um=1.0, D=1.0, nn=[3, 3],
         textures=[1.0, 1.0],
         profil={"heights": [0.0, 0.0], "indices": [1, 2]},
+        passivity_tolerance=1e-12,
         polarization=-1, config_id="g0_smoke_tm",
     )
     print(f"    Status: {result['status']}")

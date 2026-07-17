@@ -184,6 +184,7 @@ def _run_job(job_id: str, spec: dict[str, Any]) -> int:
                 "heights": spec.get("profil_heights", [0, 0]),
                 "indices": spec.get("profil_indices", [1, 1]),
             },
+            passivity_tolerance=spec["passivity_tolerance"],
             polarization=spec.get("polarization", 1),
             config_id=spec.get("config_label", job_id),
             config_hash=spec.get("config_hash", ""),

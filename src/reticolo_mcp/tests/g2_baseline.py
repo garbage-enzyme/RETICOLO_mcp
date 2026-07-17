@@ -41,6 +41,7 @@ def main():
             wl_um=1.0, D=1.0, nn=[7, 7],
             textures=[1.0, n_glass, 1.0],
             profil={"heights": [0.0, 0.5, 0.0], "indices": [1, 2, 3]},
+            passivity_tolerance=1e-12,
             polarization=pol_val, config_id="g2_slab",
         )
         R = result.get("R", -1)
@@ -70,6 +71,7 @@ def main():
         wl_um=5.0, D=1.0, nn=[5, 5],
         textures=[1.0, n_lossy, 1.0],
         profil={"heights": [0.0, 0.5, 0.0], "indices": [1, 2, 3]},
+        passivity_tolerance=1e-12,
         polarization=1, config_id="g2_lossy",
     )
     A_bal = result.get("A_balance", -1)

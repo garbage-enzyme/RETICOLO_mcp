@@ -60,7 +60,7 @@ python -m reticolo_mcp.server
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实 restart/resume 与安全边界 cancel 收据已通过；接口仍为实验性 |
 | `reticolo_convergence` | 实验性 | MCP 执行尚未通过发布验收；外部归档证据不能提升其成熟度 |
 | `reticolo_field_export` | 实验性；已验证均匀 TE artifact | 有界 `res3` 导出通过；paired mode comparison 尚未验收 |
-| `reticolo_field_pair` | 实验性 solver-free assembler | 校验同一精确网格上的两个哈希 artifact 并输出共享色限；不做模式分类 |
+| `reticolo_field_pair` | 实验性 solver-free assembler | 使用调用方给定的有界坐标容差校验两个哈希 artifact，并输出共享色限；不做模式分类 |
 
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
 历史基准证据，不会自动把当前所有工具版本提升为“已验证”。
@@ -78,6 +78,10 @@ python -m reticolo_mcp.server
 
 持久化 `job_submit` 必须携带显式资源策略。warning 结果需要使用返回的
 `decision_hash` 再次确认；refuse 结果不会启动 worker。
+科学验收策略也由调用方负责：单点、扫描、持久化 job 与收敛工具都要求显式
+`passivity_tolerance`；收敛工具还要求 center、absorption、FWHM 与 branch-match
+容差。Field export 要求 `slice_tol`，field pairing 要求有安全上限的
+`coordinate_tolerance_um`。这些值进入 artifact 或持久化身份，不再由服务端默认。
 
 ## 验证
 
@@ -103,7 +107,9 @@ python scripts\verify_installed_transport.py `
 
 可使用 `scripts\audit_external_evidence.py` 在不启动 MATLAB 的情况下审计归档收敛
 数据。审计先用 SHA-256 与精确配置身份绑定 manifest、脚本、逐点 CSV 和 summary CSV；
-提供 `--convergence-group-column` 及三个 tolerance 参数后，再从 raw rows 重建每个峰、
+使用必传 `--balance-tolerance` 检查 R/T/A 派生一致性；提供
+`--convergence-group-column` 以及 center、absorption、FWHM、数值一致性和最大阶差
+策略参数后，再从 raw rows 重建每个峰、
 双侧 half-prominence FWHM、Q 和相邻阶 center/A/width 门槛。Provenance 可以通过而科学
 验收以退出码 `2` 结束；这种 receipt 是有界 residual，不是执行崩溃，也不能提升工具
 capability。

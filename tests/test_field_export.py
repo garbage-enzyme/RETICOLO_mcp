@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,10 @@ class TestFieldRequestValidation:
     def test_invalid_axis(self):
         assert self._valid(slice_axis="time")["error_code"] == "invalid_slice_axis"
 
+    @pytest.mark.parametrize("value", [0.0, -1.0, float("inf"), True, "1e-6"])
+    def test_invalid_slice_tolerance(self, value):
+        assert self._valid(slice_tol=value)["error_code"] == "invalid_slice_tolerance"
+
     def test_tm_is_explicitly_unsupported(self):
         assert self._valid(polarization=-1)["error_code"] == "unsupported_polarization"
 
@@ -81,6 +86,7 @@ class TestFieldRequestValidation:
         result = export_field(
             engine, wl_um=5.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            slice_tol=1e-6,
             component="bad",
         )
         assert result["error_code"] == "invalid_field_component"
@@ -141,6 +147,7 @@ class TestFieldGrid:
         result = export_field(
             engine, wl_um=5.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0.0, 1.0, 0.0], "indices": [1, 2, 1]},
+            slice_tol=1e-6,
             max_points=100, x_points=11, y_points=11, z_points_per_layer=5,
         )
         assert result["error_code"] == "field_point_estimate_exceeded"
@@ -151,6 +158,7 @@ class TestFieldGrid:
         result = export_field(
             engine, wl_um=5.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0.0, 1.0], "indices": [1]},
+            slice_tol=1e-6,
         )
         assert result["error_code"] == "invalid_field_grid"
         assert not engine._engine.eval.called
@@ -252,12 +260,33 @@ class TestFieldPair:
         )
         return on_path, on_hash, off_path, off_hash
 
+    def test_pair_accepts_recorded_roundoff_below_coordinate_tolerance(
+        self, tmp_path, monkeypatch,
+    ):
+        root = tmp_path / "artifacts"
+        on_path, on_hash, off_path, off_hash = self._artifacts(root, monkeypatch)
+        with np.load(off_path, allow_pickle=False) as archive:
+            payload = {name: np.array(archive[name]) for name in archive.files}
+        payload["z"] = payload["z"] + 5e-14
+        np.savez_compressed(off_path, **payload)
+        off_hash = hashlib.sha256(off_path.read_bytes()).hexdigest()
+        result = assemble_field_pair(
+            on_artifact=on_path, off_artifact=off_path,
+            on_sha256=on_hash, off_sha256=off_hash,
+            coordinate_tolerance_um=1e-12,
+            output_dir=root / "pairs",
+        )
+        assert result["status"] == "ok"
+        assert result["coordinate_max_delta_um"]["z"] == pytest.approx(5e-14)
+        assert result["coordinate_tolerance_um"] == 1e-12
+
     def test_pair_uses_exact_grid_shared_limits_and_no_mode_claim(self, tmp_path, monkeypatch):
         root = tmp_path / "artifacts"
         on_path, on_hash, off_path, off_hash = self._artifacts(root, monkeypatch)
         result = assemble_field_pair(
             on_artifact=on_path, off_artifact=off_path,
             on_sha256=on_hash, off_sha256=off_hash,
+            coordinate_tolerance_um=0.0,
             output_dir=root / "pairs",
         )
         assert result["status"] == "ok"
@@ -275,6 +304,7 @@ class TestFieldPair:
         result = assemble_field_pair(
             on_artifact=on_path, off_artifact=off_path,
             on_sha256="0" * 64, off_sha256=off_hash,
+            coordinate_tolerance_um=0.0,
             output_dir=root / "pairs",
         )
         assert result["error_code"] == "field_pair_hash_mismatch"
@@ -287,6 +317,7 @@ class TestFieldPair:
         result = assemble_field_pair(
             on_artifact=on_path, off_artifact=off_path,
             on_sha256=on_hash, off_sha256=off_hash,
+            coordinate_tolerance_um=1e-12,
             output_dir=root / "pairs",
         )
         assert result["error_code"] == "field_pair_grid_mismatch"
@@ -297,9 +328,24 @@ class TestFieldPair:
         result = assemble_field_pair(
             on_artifact=on_path, off_artifact=off_path,
             on_sha256=on_hash, off_sha256=off_hash,
+            coordinate_tolerance_um=0.0,
             output_dir=tmp_path / "outside",
         )
         assert result["error_code"] == "unsafe_field_pair_path"
+
+    @pytest.mark.parametrize("tolerance", [-1.0, float("inf"), 1.1e-6, True])
+    def test_pair_rejects_invalid_coordinate_tolerance(
+        self, tmp_path, monkeypatch, tolerance,
+    ):
+        root = tmp_path / "artifacts"
+        on_path, on_hash, off_path, off_hash = self._artifacts(root, monkeypatch)
+        result = assemble_field_pair(
+            on_artifact=on_path, off_artifact=off_path,
+            on_sha256=on_hash, off_sha256=off_hash,
+            coordinate_tolerance_um=tolerance,
+            output_dir=root / "pairs",
+        )
+        assert result["error_code"] == "invalid_field_pair_coordinate_tolerance"
 
 
 class TestArtifactPathPolicy:
@@ -321,6 +367,7 @@ class TestArtifactPathPolicy:
         result = export_field(
             engine, wl_um=5.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            slice_tol=1e-6,
             output_dir=tmp_path / "outside",
         )
         assert result["error_code"] == "unsafe_output_path"

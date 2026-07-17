@@ -23,6 +23,14 @@ from reticolo_mcp.jobs import (
     worker_log_path,
 )
 
+_create_job_spec = create_job_spec
+
+
+def create_job_spec(*args, **kwargs):
+    """Supply the test caller's declared passivity policy."""
+    kwargs["passivity_tolerance"] = kwargs.get("passivity_tolerance", 1e-12)
+    return _create_job_spec(*args, **kwargs)
+
 
 class TestSpecHash:
     def test_deterministic(self):
@@ -60,6 +68,16 @@ class TestSpecHash:
         s2 = create_job_spec(**common, config_label="second")
         assert s1["physical_config_hash"] == s2["physical_config_hash"]
         assert s1["job_spec_hash"] == s2["job_spec_hash"]
+
+    def test_passivity_policy_changes_job_not_physical_identity(self):
+        common = dict(
+            wls_um=[5.0], D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+        )
+        strict = create_job_spec(**common, passivity_tolerance=1e-12)
+        loose = create_job_spec(**common, passivity_tolerance=1e-9)
+        assert strict["physical_config_hash"] == loose["physical_config_hash"]
+        assert strict["job_spec_hash"] != loose["job_spec_hash"]
 
     def test_different_wl_gives_different_hash(self):
         s1 = create_job_spec(wls_um=[5.0], D=[1.0], nn=[5, 5],

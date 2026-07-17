@@ -56,7 +56,6 @@ from .lease import (
 # Engine.quit() returns on Windows. Keep cleanup bounded, but allow the observed
 # asynchronous shutdown to finish before retaining fail-closed ownership evidence.
 PROCESS_EXIT_WAIT_S = 30.0
-PASSIVITY_TOL = 1e-12
 
 
 def _ensure_matlab() -> Any:
@@ -402,6 +401,7 @@ class REticoloEngine:
         nn: list[int],
         textures: list[Any],
         profil: dict[str, list],
+        passivity_tolerance: float,
         polarization: int = 1,
         theta_deg: float = 0.0,
         azimuth_deg: float = 0.0,
@@ -415,6 +415,7 @@ class REticoloEngine:
             nn: Fourier truncation orders [nx, ny].
             textures: RETICOLO texture cell array (Python list).
             profil: {"heights": [z0, z1, ..., 0], "indices": [i0, i1, ...]}.
+            passivity_tolerance: Caller-selected finite nonnegative R/T/A bound.
             polarization: 1 for TE, -1 for TM (parm.sym.pol).
             theta_deg: Signed incidence elevation in degrees (-90, 90).
             azimuth_deg: Incidence-plane azimuth in degrees [-360, 360].
@@ -423,6 +424,18 @@ class REticoloEngine:
         Returns:
             {status, wl_um, nn, R, T, A_balance, passive, solve_time_s, config_id}
         """
+        if (
+            isinstance(passivity_tolerance, bool)
+            or not isinstance(passivity_tolerance, (int, float))
+            or not math.isfinite(float(passivity_tolerance))
+            or float(passivity_tolerance) < 0
+        ):
+            return {
+                "status": "error",
+                "error_code": "invalid_passivity_tolerance",
+                "config_id": config_id,
+            }
+        passivity_tolerance = float(passivity_tolerance)
         if self._engine is None:
             return {"status": "error", "error_code": "engine_not_started",
                     "config_id": config_id}
@@ -533,9 +546,9 @@ class REticoloEngine:
             A_balance = 1.0 - R - T
             dt = round(time.time() - t0, 3)
             passive = bool(
-                -PASSIVITY_TOL <= R <= 1 + PASSIVITY_TOL
-                and -PASSIVITY_TOL <= T <= 1 + PASSIVITY_TOL
-                and -PASSIVITY_TOL <= A_balance <= 1 + PASSIVITY_TOL
+                -passivity_tolerance <= R <= 1 + passivity_tolerance
+                and -passivity_tolerance <= T <= 1 + passivity_tolerance
+                and -passivity_tolerance <= A_balance <= 1 + passivity_tolerance
             )
 
             return {
@@ -553,7 +566,8 @@ class REticoloEngine:
                 "passive": passive,
                 "passivity_policy": {
                     "name": "bounded_rta_v1",
-                    "tolerance": PASSIVITY_TOL,
+                    "tolerance": passivity_tolerance,
+                    "source": "caller_supplied",
                     "evidence_kind": "policy_outcome_not_independent_closure",
                 },
                 "solve_time_s": dt,

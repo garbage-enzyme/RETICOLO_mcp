@@ -59,7 +59,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `job_submit/status/tail/cancel/resume` | Experimental | Real restart/resume and safe-boundary cancellation receipts passed; interface remains experimental |
 | `reticolo_convergence` | Experimental | MCP execution is not release accepted; external archived evidence cannot promote it |
 | `reticolo_field_export` | Experimental; verified uniform TE artifact | Bounded `res3` export passed; paired mode comparison is not accepted |
-| `reticolo_field_pair` | Experimental solver-free assembler | Verifies two hashed artifacts on one exact grid and emits shared limits; no mode classification |
+| `reticolo_field_pair` | Experimental solver-free assembler | Verifies two hashed artifacts using a caller-supplied bounded coordinate tolerance and emits shared limits; no mode classification |
 
 Use `reticolo_capabilities` as the live maturity and deployment receipt. Historical
 real-engine results below remain fixture evidence; they do not promote every current
@@ -78,6 +78,11 @@ incident medium. Durable jobs currently remain normal-incidence only.
 
 Durable `job_submit` requires an explicit resource policy. A warning decision must be
 resubmitted with the returned `decision_hash`; a refusal never launches a worker.
+Scientific acceptance policy is also caller-owned: point solves, sweeps, durable
+jobs, and convergence require `passivity_tolerance`; convergence additionally
+requires center, absorption, FWHM, and branch-match tolerances. Field export requires
+`slice_tol`, while field pairing requires a bounded `coordinate_tolerance_um`. These
+values enter artifacts or durable identity instead of server defaults.
 
 ## Verification
 
@@ -104,7 +109,9 @@ for a separately declared restart-bound profile check, then restart without it.
 Archived convergence data can be audited without MATLAB by using
 `scripts\audit_external_evidence.py`. The audit first binds the manifest, script,
 point CSV, and summary CSV by SHA-256 and exact configuration identity. With
-`--convergence-group-column` and all three tolerance arguments, it then reconstructs
+the required `--balance-tolerance`, it checks derived R/T/A consistency. With
+`--convergence-group-column` plus center, absorption, FWHM, numeric-consistency, and
+maximum order-gap policy arguments, it then reconstructs
 each peak, two-sided half-prominence FWHM, Q, and adjacent-order center/A/width gate
 from raw rows. Provenance can pass while scientific acceptance returns exit code `2`;
 such a receipt is a bounded residual, not an execution failure or capability promotion.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import time
+from decimal import Decimal, ROUND_FLOOR
 from pathlib import Path
 from typing import Any
 
@@ -35,18 +36,42 @@ def run_convergence(
     D: list[float],
     textures: list[Any],
     profil: dict[str, list],
+    passivity_tolerance: float,
+    tol_wl_um: float,
+    tol_A: float,
+    tol_fwhm_nm: float,
+    max_match_shift_um: float,
     polarization: int = 1,
     output_dir: str | Path,
     config_label: str = "",
-    tol_wl_um: float = 0.002,
-    tol_A: float = 0.01,
-    tol_fwhm_nm: float = 1.0,
 ) -> dict[str, Any]:
     """Run progressive harmonic convergence over nn orders.
 
     Returns a summary with per-order peaks, FWHM, convergence status,
     and final converged peaks.
     """
+    policy_values = {
+        "passivity_tolerance": passivity_tolerance,
+        "tol_wl_um": tol_wl_um,
+        "tol_A": tol_A,
+        "tol_fwhm_nm": tol_fwhm_nm,
+        "max_match_shift_um": max_match_shift_um,
+    }
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0
+        for value in policy_values.values()
+    ):
+        raise ValueError(
+            "convergence policy values must be finite nonnegative real numbers"
+        )
+    passivity_tolerance = float(passivity_tolerance)
+    tol_wl_um = float(tol_wl_um)
+    tol_A = float(tol_A)
+    tol_fwhm_nm = float(tol_fwhm_nm)
+    max_match_shift_um = float(max_match_shift_um)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -67,6 +92,7 @@ def run_convergence(
             engine=engine,
             wls_um=coarse_wls, nn=nn, D=D,
             textures=textures, profil=profil,
+            passivity_tolerance=passivity_tolerance,
             polarization=polarization,
             config_id=stage_label,
             csv_path=str(csv_path),
@@ -89,6 +115,7 @@ def run_convergence(
                 engine=engine,
                 wls_um=fine_wls, nn=nn, D=D,
                 textures=textures, profil=profil,
+                passivity_tolerance=passivity_tolerance,
                 polarization=polarization,
                 config_id=f"{stage_label}_fine",
                 csv_path=str(fine_csv),
@@ -107,7 +134,7 @@ def run_convergence(
         converged, next_branch_index = _compare_peak_sets(
             prev_peaks, fine_peaks, next_branch_index=next_branch_index,
             tol_wl_um=tol_wl_um, tol_A=tol_A,
-            tol_fwhm_nm=tol_fwhm_nm,
+            tol_fwhm_nm=tol_fwhm_nm, max_match_shift_um=max_match_shift_um,
         )
 
         order_summary = {
@@ -116,6 +143,14 @@ def run_convergence(
             "analysis": analysis,
             "fine_peaks": fine_peaks,
             "converged_peaks": converged,
+            "acceptance_policy": {
+                "passivity_tolerance": passivity_tolerance,
+                "center_tolerance_um": tol_wl_um,
+                "absorption_tolerance": tol_A,
+                "fwhm_tolerance_nm": tol_fwhm_nm,
+                "max_branch_match_shift_um": max_match_shift_um,
+                "source": "caller_supplied",
+            },
         }
 
         import json
@@ -137,13 +172,21 @@ def run_convergence(
         "nn_range": [nn_start, nn_max, nn_step],
         "runtime_s": round(time.time() - t0, 1),
         "output_dir": str(output_dir),
+        "acceptance_policy": {
+            "passivity_tolerance": passivity_tolerance,
+            "center_tolerance_um": tol_wl_um,
+            "absorption_tolerance": tol_A,
+            "fwhm_tolerance_nm": tol_fwhm_nm,
+            "max_branch_match_shift_um": max_match_shift_um,
+            "source": "caller_supplied",
+        },
     }
 
 
 def _compare_peak_sets(
     previous: list[dict[str, Any]], current: list[dict[str, Any]], *,
     next_branch_index: int, tol_wl_um: float, tol_A: float,
-    tol_fwhm_nm: float, max_match_shift_um: float = 0.05,
+    tol_fwhm_nm: float, max_match_shift_um: float,
 ) -> tuple[list[dict[str, Any]], int]:
     """Match branches one-to-one and require center, amplitude, and width."""
     candidates = sorted(
@@ -276,5 +319,12 @@ def _arange(start: float, stop: float, step: float) -> list[float]:
         raise ValueError("arange step must be positive")
     if stop < start:
         raise ValueError("arange stop must be >= start")
-    count = math.floor((stop - start) / step + 1e-12) + 1
-    return [float(f"{start + index * step:.15g}") for index in range(count)]
+    start_decimal = Decimal(str(start))
+    stop_decimal = Decimal(str(stop))
+    step_decimal = Decimal(str(step))
+    count = int(
+        ((stop_decimal - start_decimal) / step_decimal).to_integral_value(
+            rounding=ROUND_FLOOR,
+        )
+    ) + 1
+    return [float(start_decimal + index * step_decimal) for index in range(count)]

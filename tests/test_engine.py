@@ -334,6 +334,7 @@ class TestEngineLifecycle:
             nn=[5, 5],
             textures=[1.0, 1.5, 1.0],
             profil={"heights": [0, 0.1, 0], "indices": [1, 2, 3]},
+            passivity_tolerance=1e-12,
         )
         assert r["status"] == "error"
         assert r["error_code"] == "engine_not_started"
@@ -371,6 +372,7 @@ class TestEngineLifecycle:
         result = eng.solve_point(
             wl_um=5.0, D=[1.0], nn=[5, 5], textures=[1.0],
             profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12,
         )
         assert result["status"] == "error"
         assert result["error_code"] == "solver_lease_lost"
@@ -392,6 +394,7 @@ class TestSolveValidation:
             r = eng.solve_point(
                 wl_um=5.0, D=1.0, nn=[5, 5],
                 textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+                passivity_tolerance=1e-12,
                 polarization=0,
             )
         assert r["status"] == "error"
@@ -405,6 +408,7 @@ class TestSolveValidation:
         r = eng.solve_point(
             wl_um=5.0, D=[1, 2, 3], nn=[5, 5],
             textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12,
         )
         assert r["status"] == "error"
         assert r["error_code"] == "invalid_D"
@@ -422,6 +426,7 @@ class TestSolveValidation:
                 wl_um=1.0, D=[1.0, 1.0], nn=[5, 5],
                 textures=[1.0, 1.5, 1.0],
                 profil={"heights": [0, 0.5, 0], "indices": [1, 2, 3]},
+                passivity_tolerance=1e-12,
                 polarization=-1, theta_deg=-5.0, azimuth_deg=30.0,
             )
         commands = "\n".join(
@@ -451,6 +456,7 @@ class TestSolveValidation:
             result = eng.solve_point(
                 wl_um=1.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0, 1.5, 1.0],
                 profil={"heights": [0, 0.5, 0], "indices": [1, 2, 3]},
+                passivity_tolerance=1e-12,
                 polarization=-1,
             )
         assert result["A_balance"] == pytest.approx(-1.1102230246251565e-16)
@@ -458,8 +464,21 @@ class TestSolveValidation:
         assert result["passivity_policy"] == {
             "name": "bounded_rta_v1",
             "tolerance": 1e-12,
+            "source": "caller_supplied",
             "evidence_kind": "policy_outcome_not_independent_closure",
         }
+
+    @pytest.mark.parametrize("tolerance", [-1.0, float("inf"), True, "1e-12"])
+    def test_invalid_passivity_tolerance_is_rejected(self, tolerance):
+        from reticolo_mcp.engine import REticoloEngine
+
+        eng = REticoloEngine(Path("/"))
+        result = eng.solve_point(
+            wl_um=1.0, D=[1.0], nn=[5, 5], textures=[1.0],
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=tolerance,
+        )
+        assert result["error_code"] == "invalid_passivity_tolerance"
 
     @pytest.mark.parametrize(
         ("kwargs", "error_code"),
@@ -476,7 +495,8 @@ class TestSolveValidation:
         eng._engine = MagicMock()
         result = eng.solve_point(
             wl_um=1.0, D=[1.0, 1.0], nn=[5, 5], textures=[1.0],
-            profil={"heights": [0, 0], "indices": [1, 1]}, **kwargs,
+            profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12, **kwargs,
         )
         assert result["error_code"] == error_code
 
@@ -488,7 +508,8 @@ class TestSolveValidation:
         result = eng.solve_point(
             wl_um=1.0, D=[1.0, 1.0], nn=[5, 5],
             textures=[[1.0, [0, 0, 0.2, 0.2, 1.5, 1]], 1.0],
-            profil={"heights": [0, 0], "indices": [1, 2]}, theta_deg=5.0,
+            profil={"heights": [0, 0], "indices": [1, 2]},
+            passivity_tolerance=1e-12, theta_deg=5.0,
         )
         assert result["error_code"] == "unsupported_incident_medium"
 
@@ -625,6 +646,7 @@ class TestServerValidation:
         r = eng.solve_point(
             wl_um=5.0, D=[1, 2, 3], nn=[5, 5],
             textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12,
             config_id="a" * 200,
         )
         assert r["status"] == "error"
@@ -640,6 +662,7 @@ class TestServerValidation:
             wl_um=5.0, D=[1, 2, 3], nn=[5, 5],
             textures=[1.0] * 40,
             profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12,
         )
         assert r["status"] == "error"
         assert r["error_code"] == "invalid_D"

@@ -55,6 +55,7 @@ class TestBranchComparison:
         result, _ = _compare_peak_sets(
             previous, current, next_branch_index=2,
             tol_wl_um=0.002, tol_A=0.01, tol_fwhm_nm=1.0,
+            max_match_shift_um=0.05,
         )
         assert result[0]["convergence"] == "partial"
         assert result[0]["delta_fwhm_nm"] is None
@@ -68,6 +69,7 @@ class TestBranchComparison:
         result, _ = _compare_peak_sets(
             previous, current, next_branch_index=2,
             tol_wl_um=0.002, tol_A=0.01, tol_fwhm_nm=1.0,
+            max_match_shift_um=0.05,
         )
         assert result[0]["convergence"] == "converged"
         assert result[0]["branch_id"] == "branch-001"
@@ -84,6 +86,7 @@ class TestBranchComparison:
         result, _ = _compare_peak_sets(
             previous, current, next_branch_index=3,
             tol_wl_um=0.002, tol_A=0.01, tol_fwhm_nm=1.0,
+            max_match_shift_um=0.05,
         )
         assert [item["branch_id"] for item in result] == ["branch-002", "branch-001"]
 
@@ -91,7 +94,7 @@ class TestBranchComparison:
         result, next_index = _compare_peak_sets(
             [], [{"wl_um": 5.0, "A": 0.8, "fwhm_nm": 10.0}],
             next_branch_index=4, tol_wl_um=0.002, tol_A=0.01,
-            tol_fwhm_nm=1.0,
+            tol_fwhm_nm=1.0, max_match_shift_um=0.05,
         )
         assert result[0]["branch_id"] == "branch-004"
         assert result[0]["convergence"] == "new"

@@ -22,10 +22,13 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--max-artifact-bytes", type=int, default=64 * 1024 * 1024)
     parser.add_argument("--max-rows", type=int, default=2_000_000)
+    parser.add_argument("--balance-tolerance", type=float, required=True)
     parser.add_argument("--convergence-group-column")
     parser.add_argument("--tol-center-nm", type=float)
     parser.add_argument("--tol-absorption", type=float)
     parser.add_argument("--tol-fwhm-relative", type=float)
+    parser.add_argument("--max-pair-order-gap", type=int)
+    parser.add_argument("--numeric-tolerance", type=float)
     args = parser.parse_args()
 
     receipt = audit_external_evidence_bundle(
@@ -33,15 +36,17 @@ def main() -> int:
         points_path=args.points,
         summary_path=args.summary,
         script_path=args.script,
+        balance_tolerance=args.balance_tolerance,
         max_artifact_bytes=args.max_artifact_bytes,
         max_rows=args.max_rows,
     )
     convergence_values = (
         args.tol_center_nm, args.tol_absorption, args.tol_fwhm_relative,
+        args.max_pair_order_gap, args.numeric_tolerance,
     )
     if args.convergence_group_column:
         if any(value is None for value in convergence_values):
-            parser.error("all three convergence tolerances are required")
+            parser.error("all convergence policy values are required")
         receipt["scientific_convergence_audit"] = evaluate_peak_convergence_contract(
             points_path=args.points,
             summary_path=args.summary,
@@ -49,6 +54,8 @@ def main() -> int:
             tol_center_nm=args.tol_center_nm,
             tol_absorption=args.tol_absorption,
             tol_fwhm_relative=args.tol_fwhm_relative,
+            max_pair_order_gap=args.max_pair_order_gap,
+            numeric_tolerance=args.numeric_tolerance,
             max_rows=args.max_rows,
         )
         receipt["scientific_acceptance"] = receipt[

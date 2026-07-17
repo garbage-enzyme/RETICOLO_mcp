@@ -42,9 +42,9 @@ def audit_external_evidence_bundle(
     points_path: str | Path,
     summary_path: str | Path,
     script_path: str | Path,
+    balance_tolerance: float,
     max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
     max_rows: int = DEFAULT_MAX_ROWS,
-    balance_tolerance: float = 1e-9,
 ) -> dict[str, Any]:
     """Validate and hash one archived convergence evidence bundle.
 
@@ -54,8 +54,14 @@ def audit_external_evidence_bundle(
     """
     if max_artifact_bytes <= 0 or max_rows <= 0:
         raise ExternalEvidenceError("audit bounds must be positive")
-    if not math.isfinite(balance_tolerance) or balance_tolerance < 0:
+    if (
+        isinstance(balance_tolerance, bool)
+        or not isinstance(balance_tolerance, (int, float))
+        or not math.isfinite(float(balance_tolerance))
+        or float(balance_tolerance) < 0
+    ):
         raise ExternalEvidenceError("balance_tolerance must be finite and nonnegative")
+    balance_tolerance = float(balance_tolerance)
 
     paths = {
         "manifest": _bounded_file(manifest_path, max_artifact_bytes),
@@ -109,6 +115,10 @@ def audit_external_evidence_bundle(
         "capability_promotion_allowed": False,
         "config_id": config_id,
         "script_sha256": script_sha256,
+        "acceptance_policy": {
+            "balance_tolerance": balance_tolerance,
+            "source": "caller_supplied",
+        },
         "artifacts": artifacts,
         "point_evidence": points,
         "summary_evidence": summary,
@@ -129,15 +139,26 @@ def audit_peak_convergence_claims(
     tol_center_nm: float,
     tol_absorption: float,
     tol_fwhm_relative: float,
-    max_pair_order_gap: int = 2,
-    numeric_tolerance: float = 1e-9,
+    max_pair_order_gap: int,
+    numeric_tolerance: float,
     max_rows: int = DEFAULT_MAX_ROWS,
 ) -> dict[str, Any]:
     """Reconstruct archived peak metrics and convergence decisions from raw rows."""
     tolerances = (tol_center_nm, tol_absorption, tol_fwhm_relative, numeric_tolerance)
-    if not all(math.isfinite(value) and value >= 0 for value in tolerances):
+    if not all(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and float(value) >= 0
+        for value in tolerances
+    ):
         raise ExternalEvidenceError("convergence tolerances must be finite and nonnegative")
-    if max_pair_order_gap <= 0 or max_rows <= 0:
+    if (
+        isinstance(max_pair_order_gap, bool)
+        or not isinstance(max_pair_order_gap, int)
+        or max_pair_order_gap <= 0
+        or max_rows <= 0
+    ):
         raise ExternalEvidenceError("convergence bounds must be positive")
 
     try:
@@ -301,6 +322,8 @@ def audit_peak_convergence_claims(
             "absorption": tol_absorption,
             "fwhm_relative": tol_fwhm_relative,
             "max_pair_order_gap": max_pair_order_gap,
+            "numeric_tolerance": numeric_tolerance,
+            "source": "caller_supplied",
         },
     }
 

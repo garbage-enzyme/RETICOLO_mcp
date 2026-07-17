@@ -15,7 +15,20 @@ from reticolo_mcp.sweep import (
     run_sweep,
 )
 
-HEADER = "wl_um,nn_x,nn_y,R,T,A_balance,passive,solve_time_s,status,error,config_hash,config_id,polarization,timestamp"
+_run_sweep = run_sweep
+
+
+def run_sweep(*args, **kwargs):
+    """Supply the test caller's declared passivity policy."""
+    kwargs["passivity_tolerance"] = kwargs.get("passivity_tolerance", 1e-12)
+    return _run_sweep(*args, **kwargs)
+
+HEADER = (
+    "wl_um,nn_x,nn_y,R,T,A_balance,passive,passivity_tolerance,"
+    "passivity_policy_name,passivity_policy_source,passivity_evidence_kind,"
+    "solve_time_s,status,error,"
+    "config_hash,config_id,polarization,timestamp"
+)
 
 
 def _ok_result(wl: float) -> dict:
@@ -44,9 +57,9 @@ class TestReadCompleted:
         csv = tmp_path / "test.csv"
         csv.write_text(
             HEADER + "\n"
-            "5.000,5,5,0.1,0.8,0.1,True,1.0,ok,,,test,1,2026-07-13T00:00:00\n"
-            "5.001,5,5,0.1,0.8,0.1,True,1.0,ok,,,test,1,2026-07-13T00:00:00\n"
-            "5.002,5,5,,,,,,,error,died,,test,,2026-07-13T00:00:00\n"
+            "5.000,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,,test,1,2026-07-13T00:00:00\n"
+            "5.001,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,,test,1,2026-07-13T00:00:00\n"
+            "5.002,5,5,,,,,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,,error,died,,test,,2026-07-13T00:00:00\n"
         )
         completed = _read_completed(csv, "test")
         assert completed == {5.000, 5.001}
@@ -55,7 +68,7 @@ class TestReadCompleted:
         csv = tmp_path / "test.csv"
         csv.write_text(
             HEADER + "\n"
-            "5.000,5,5,0.1,0.8,0.1,True,1.0,ok,,,old_config,1,2026-07-13T00:00:00\n"
+            "5.000,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,,old_config,1,2026-07-13T00:00:00\n"
         )
         assert _read_completed(csv, "new_config") == set()
 
@@ -120,8 +133,8 @@ class TestRunSweep:
         csv_path = tmp_path / "mixed.csv"
         csv_path.write_text(
             HEADER + "\n"
-            "5.0,5,5,0.1,0.8,0.1,True,1,ok,,good,label,1,now\n"
-            "5.1,5,5,0.1,0.8,0.1,True,1,ok,,other,label,1,now\n",
+            "5.0,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1,ok,,good,label,1,now\n"
+            "5.1,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1,ok,,other,label,1,now\n",
             encoding="utf-8",
         )
         result = run_sweep(
@@ -144,6 +157,25 @@ class TestRunSweep:
         )
         assert result["status"] == "error"
         assert "header" in result["error"]
+
+    def test_rejects_passivity_policy_change_on_resume(self, tmp_path):
+        engine = MagicMock()
+        csv_path = tmp_path / "policy.csv"
+        csv_path.write_text(
+            HEADER + "\n"
+            "5.0,5,5,0.1,0.8,0.1,True,1e-9,bounded_rta_v1,caller_supplied,"
+            "policy_outcome_not_independent_closure,1,ok,,good,label,1,now\n",
+            encoding="utf-8",
+        )
+        result = run_sweep(
+            engine, wls_um=[5.0], nn=[5, 5], D=1.0,
+            textures=[1.0], profil={"heights": [0, 0], "indices": [1, 1]},
+            passivity_tolerance=1e-12,
+            config_hash="good", csv_path=csv_path,
+        )
+        assert result["status"] == "error"
+        assert "passivity_tolerance mismatch" in result["error"]
+        engine.solve_point.assert_not_called()
 
     def test_wavelength_round_trips_beyond_six_decimals(self, tmp_path):
         engine = MagicMock()
@@ -215,7 +247,7 @@ class TestRunSweep:
         csv = tmp_path / "sweep.csv"
         csv.write_text(
             HEADER + "\n"
-            "5.000,5,5,0.1,0.8,0.1,True,1.0,ok,,,sweep1,1,2026-07-13T00:00:00\n"
+            "5.000,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,,sweep1,1,2026-07-13T00:00:00\n"
         )
         r = run_sweep(
             engine, wls_um=[5.0], nn=[5, 5], D=1.0,
@@ -261,8 +293,8 @@ class TestRunSweep:
         csv = tmp_path / "sweep.csv"
         csv.write_text(
             HEADER + "\n"
-            "5.000,5,5,0.1,0.8,0.1,True,1.0,ok,,,sweep4,1,2026-07-13T00:00:00\n"
-            "5.100,5,5,,,,,,,error,crashed,,sweep4,,2026-07-13T00:00:00\n"
+            "5.000,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,,sweep4,1,2026-07-13T00:00:00\n"
+            "5.100,5,5,,,,,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,,error,crashed,,sweep4,,2026-07-13T00:00:00\n"
         )
         r = run_sweep(
             engine, wls_um=[5.0, 5.1, 5.2], nn=[5, 5], D=1.0,
@@ -279,7 +311,7 @@ class TestReadFirstConfigHash:
         csv_p = tmp_path / "test.csv"
         csv_p.write_text(
             HEADER + "\n"
-            "5.000,5,5,0.1,0.8,0.1,True,1.0,ok,,abc123,test,1,2026-07-13T00:00:00\n"
+            "5.000,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,abc123,test,1,2026-07-13T00:00:00\n"
         )
         assert _read_first_config_hash(csv_p) == "abc123"
 
@@ -300,14 +332,14 @@ class TestReadFirstConfigHash:
         csv_p = tmp_path / "test.csv"
         csv_p.write_text(
             HEADER + "\n"
-            "5.000,5,5,0.1,0.8,0.1,True,1.0,ok,,,test,1,2026-07-13T00:00:00\n"
+            "5.000,5,5,0.1,0.8,0.1,True,1e-12,bounded_rta_v1,caller_supplied,policy_outcome_not_independent_closure,1.0,ok,,,test,1,2026-07-13T00:00:00\n"
         )
         assert _read_first_config_hash(csv_p) is None
 
 
 class TestAnalyzeSweep:
     def _write_csv(self, path: Path, rows: list[dict]) -> None:
-        header = "wl_um,nn_x,nn_y,R,T,A_balance,passive,solve_time_s,status,error,config_hash,config_id,polarization,timestamp"
+        header = HEADER
         with open(path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(header.split(","))
@@ -317,7 +349,8 @@ class TestAnalyzeSweep:
                     f"{r.get('R', 0.1):.12f}",
                     f"{r.get('T', 0.9 - r.get('A', 0.1)):.12f}",
                     f"{r.get('A', 0.1):.12f}",
-                    "True", "1.0",
+                    "True", "1e-12", "bounded_rta_v1", "caller_supplied",
+                    "policy_outcome_not_independent_closure", "1.0",
                     r.get("status", "ok"),
                     r.get("error", ""),
                     "",

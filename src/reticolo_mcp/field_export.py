@@ -31,6 +31,7 @@ HARD_MAX_Z_POINTS_PER_LAYER = 201
 HARD_MAX_FIELD_ORDER = 15
 HARD_MAX_FIELD_ARTIFACT_BYTES = 64 * 1024 * 1024
 HARD_MAX_FIELD_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+HARD_MAX_FIELD_PAIR_COORDINATE_TOL_UM = 1e-6
 
 
 def export_field(
@@ -41,11 +42,11 @@ def export_field(
     nn: list[int],
     textures: list[Any],
     profil: dict[str, list],
+    slice_tol: float,
     polarization: int = 1,
     component: str = "normE",
     slice_axis: str = "z",
     slice_value: float = 0.0,
-    slice_tol: float = 1e-6,
     max_points: int = 500_000,
     x_points: int = 41,
     y_points: int = 41,
@@ -293,6 +294,12 @@ def _validate_field_request(
     polarization: int = 1,
     x_points: int = 41, y_points: int = 41, z_points_per_layer: int = 21,
 ) -> dict[str, Any] | None:
+    if (
+        isinstance(slice_tol, bool)
+        or not isinstance(slice_tol, (int, float))
+        or not math.isfinite(float(slice_tol))
+    ):
+        return {"status": "error", "error_code": "invalid_slice_tolerance"}
     values = [wl_um, slice_value, slice_tol, *D]
     try:
         finite = all(math.isfinite(float(v)) for v in values)
@@ -516,9 +523,22 @@ def assemble_field_pair(
     off_artifact: str | Path,
     on_sha256: str,
     off_sha256: str,
+    coordinate_tolerance_um: float,
     output_dir: str | Path,
 ) -> dict[str, Any]:
     """Validate two field artifacts and emit a bounded shared-grid pair."""
+    if (
+        isinstance(coordinate_tolerance_um, bool)
+        or not isinstance(coordinate_tolerance_um, (int, float))
+        or not math.isfinite(float(coordinate_tolerance_um))
+        or not 0 <= float(coordinate_tolerance_um) <= HARD_MAX_FIELD_PAIR_COORDINATE_TOL_UM
+    ):
+        return {
+            "status": "error",
+            "error_code": "invalid_field_pair_coordinate_tolerance",
+            "hard_max_coordinate_tolerance_um": HARD_MAX_FIELD_PAIR_COORDINATE_TOL_UM,
+        }
+    coordinate_tolerance_um = float(coordinate_tolerance_um)
     try:
         out = _resolve_output_dir(output_dir)
         if out is None:
@@ -554,11 +574,21 @@ def assemble_field_pair(
     if on["point_fingerprint_sha256"] == off["point_fingerprint_sha256"]:
         return {"status": "error", "error_code": "field_pair_points_not_distinct"}
     coordinate_names = ("x", "y", "z")
-    if any(
-        on[name].shape != off[name].shape or not np.array_equal(on[name], off[name])
+    if any(on[name].shape != off[name].shape for name in coordinate_names):
+        return {"status": "error", "error_code": "field_pair_grid_shape_mismatch"}
+    coordinate_max_delta_um = {
+        name: float(np.max(np.abs(on[name] - off[name])))
         for name in coordinate_names
+    }
+    if any(
+        delta > coordinate_tolerance_um
+        for delta in coordinate_max_delta_um.values()
     ):
-        return {"status": "error", "error_code": "field_pair_grid_mismatch"}
+        return {
+            "status": "error", "error_code": "field_pair_grid_mismatch",
+            "coordinate_max_delta_um": coordinate_max_delta_um,
+            "coordinate_tolerance_um": coordinate_tolerance_um,
+        }
 
     on_field = on["field"]
     off_field = off["field"]
@@ -591,6 +621,7 @@ def assemble_field_pair(
             field_sampling_sha256=np.array(on["field_sampling_sha256"]),
             on_point_fingerprint_sha256=np.array(on["point_fingerprint_sha256"]),
             off_point_fingerprint_sha256=np.array(off["point_fingerprint_sha256"]),
+            coordinate_tolerance_um=np.array(coordinate_tolerance_um),
         )
         with temp_path.open("r+b") as handle:
             os.fsync(handle.fileno())
@@ -611,6 +642,8 @@ def assemble_field_pair(
         "on_point_fingerprint_sha256": on["point_fingerprint_sha256"],
         "off_point_fingerprint_sha256": off["point_fingerprint_sha256"],
         "point_count": int(on_field.size),
+        "coordinate_max_delta_um": coordinate_max_delta_um,
+        "coordinate_tolerance_um": coordinate_tolerance_um,
         "shared_limits": [shared_min, shared_max],
         "max_abs_ratio_on_over_off": (
             float(np.max(on_field)) / off_max if off_max > 0 else None
@@ -676,8 +709,8 @@ def _load_field_artifact(path: Path) -> dict[str, Any]:
         for name in array_names
     ):
         raise ValueError("field artifact arrays must be finite")
-    if np.any(result["field"] < 0) or not np.allclose(
-        result["field"], np.abs(result["field_complex"]), rtol=1e-12, atol=1e-15,
+    if np.any(result["field"] < 0) or not np.array_equal(
+        result["field"], np.abs(result["field_complex"]), equal_nan=False,
     ):
         raise ValueError("field magnitude is inconsistent with field_complex")
     return result
