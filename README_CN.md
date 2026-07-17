@@ -60,7 +60,7 @@ python -m reticolo_mcp.server
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实 restart/resume 与安全边界 cancel 收据已通过；接口仍为实验性 |
 | `reticolo_convergence` | 实验性 | MCP 执行尚未通过发布验收；外部归档证据不能提升其成熟度 |
 | `reticolo_field_export` | 实验性；已验证均匀 TE artifact | 有界 `res3` 导出通过；paired mode comparison 尚未验收 |
-| `reticolo_field_pair` | 实验性 solver-free assembler | 使用调用方给定的有界坐标容差校验两个哈希 artifact，并输出共享色限；不做模式分类 |
+| `reticolo_field_pair` | 实验性；真实 artifact pair 已验证 | 两个带哈希的均匀 TE artifact 已通过调用方有界坐标匹配和共享色限组装；不做模式分类 |
 
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
 历史基准证据，不会自动把当前所有工具版本提升为“已验证”。
@@ -139,9 +139,10 @@ capability。
 - **收敛：** MCP convergence 路径仍为实验性且默认禁用。归档 Xu 证据通过了独立的
   三指标重建；归档 Sun summary 缺少 width 契约。两者都不能提升 MCP 执行成熟度。
 - **场导出：** 旧 `imag(apod)` 失败来自把 `ef` 传给 RETICOLO 单参数
-  `retchamp` apodization helper。修正后的有界 `res3` 路径已有一个均匀 TE artifact
-  通过真实验收，并嵌入 source/config/point/request 身份。TM、共振模式比较、paired
-  shared-grid review 和 publication claim 均未验收。
+  `retchamp` apodization helper。修正后的有界 `res3` 路径已有均匀 TE artifact
+  通过真实验收，并嵌入 source/config/point/request 身份。一次 solver-free recovery
+  使用调用方给定的 `1e-12 um` 坐标容差配对了两个真实 artifact，实测最大差为
+  `5.55e-17 um`。TM、共振模式分类、视觉模式结论和 publication claim 均未验收。
 
 ## ⚠ 磁盘安全
 

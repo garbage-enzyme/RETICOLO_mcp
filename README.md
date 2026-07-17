@@ -59,7 +59,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `job_submit/status/tail/cancel/resume` | Experimental | Real restart/resume and safe-boundary cancellation receipts passed; interface remains experimental |
 | `reticolo_convergence` | Experimental | MCP execution is not release accepted; external archived evidence cannot promote it |
 | `reticolo_field_export` | Experimental; verified uniform TE artifact | Bounded `res3` export passed; paired mode comparison is not accepted |
-| `reticolo_field_pair` | Experimental solver-free assembler | Verifies two hashed artifacts using a caller-supplied bounded coordinate tolerance and emits shared limits; no mode classification |
+| `reticolo_field_pair` | Experimental; real-artifact pair verified | Two hashed uniform-TE artifacts passed caller-bounded coordinate matching and shared-limit assembly; no mode classification |
 
 Use `reticolo_capabilities` as the live maturity and deployment receipt. Historical
 real-engine results below remain fixture evidence; they do not promote every current
@@ -143,10 +143,12 @@ such a receipt is a bounded residual, not an execution failure or capability pro
   while the archived Sun summary lacks the width contract. Neither external result
   promotes MCP execution maturity.
 - **Field export:** the old `imag(apod)` failure came from passing `ef` to RETICOLO's
-  one-argument `retchamp` apodization helper. The corrected bounded `res3` path has one
-  verified uniform-TE artifact with embedded source/config/point/request identities.
-  TM, resonant-mode comparison, paired shared-grid review, and publication claims are
-  not accepted.
+  one-argument `retchamp` apodization helper. The corrected bounded `res3` path has
+  verified uniform-TE artifacts with embedded source/config/point/request identities.
+  A solver-free recovery paired two real artifacts at a caller-selected `1e-12 um`
+  coordinate tolerance; the measured maximum delta was `5.55e-17 um`. TM,
+  resonant-mode classification, visual mode claims, and publication claims remain
+  unaccepted.
 
 ## ⚠ Disk safety
 

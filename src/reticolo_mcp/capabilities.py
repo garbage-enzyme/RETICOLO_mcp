@@ -29,7 +29,7 @@ TOOL_MATURITY = {
     "job_resume": "experimental",
     "reticolo_convergence": "experimental_not_release_accepted",
     "reticolo_field_export": "experimental_verified_uniform_te_field_artifact",
-    "reticolo_field_pair": "experimental_solver_free_paired_field_assembler",
+    "reticolo_field_pair": "experimental_verified_real_artifact_pair_assembler",
 }
 
 
@@ -58,8 +58,8 @@ def capability_receipt(tool_names: Iterable[str]) -> dict[str, Any]:
                 "does not promote MCP execution maturity"
             ),
             (
-                "field export is verified only for one bounded uniform TE artifact; "
-                "paired mode comparison is not accepted"
+                "field export is verified only for bounded uniform TE artifacts; "
+                "paired numerical assembly passed but mode comparison is not accepted"
             ),
         ],
     }

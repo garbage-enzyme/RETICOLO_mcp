@@ -43,12 +43,12 @@ def test_field_and_convergence_are_not_marked_verified():
         for limitation in receipt["known_limitations"]
     )
     assert any(
-        "uniform TE artifact" in limitation and "paired mode" in limitation
+        "uniform TE artifacts" in limitation and "mode comparison" in limitation
         for limitation in receipt["known_limitations"]
     )
     assert (
         receipt["tool_maturity"]["reticolo_field_pair"]
-        == "experimental_solver_free_paired_field_assembler"
+        == "experimental_verified_real_artifact_pair_assembler"
     )
 
 
