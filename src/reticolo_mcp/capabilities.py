@@ -28,7 +28,7 @@ TOOL_MATURITY = {
     "job_cancel": "experimental_cooperative_boundary_only",
     "job_resume": "experimental",
     "reticolo_convergence": "experimental_not_release_accepted",
-    "reticolo_field_export": "unavailable_on_failing_v10_path",
+    "reticolo_field_export": "experimental_verified_uniform_te_field_artifact",
 }
 
 
@@ -56,7 +56,10 @@ def capability_receipt(tool_names: Iterable[str]) -> dict[str, Any]:
                 "convergence remains experimental; archived external evidence "
                 "does not promote MCP execution maturity"
             ),
-            "RETICOLO V10 field export fails on the current retchamp fixture",
+            (
+                "field export is verified only for one bounded uniform TE artifact; "
+                "paired mode comparison is not accepted"
+            ),
         ],
     }
 

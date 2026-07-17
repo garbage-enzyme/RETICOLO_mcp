@@ -58,7 +58,7 @@ non-editable installation and makes the deployment receipt report `source_tree`.
 | `reticolo_sweep` | Experimental, disabled by default | Legacy synchronous sweep; prefer durable jobs |
 | `job_submit/status/tail/cancel/resume` | Experimental | Real restart/resume and safe-boundary cancellation receipts passed; interface remains experimental |
 | `reticolo_convergence` | Experimental | MCP execution is not release accepted; external archived evidence cannot promote it |
-| `reticolo_field_export` | Unavailable on failing V10 path | Current retchamp fixture fails upstream |
+| `reticolo_field_export` | Experimental; verified uniform TE artifact | Bounded `res3` export passed; paired mode comparison is not accepted |
 
 Use `reticolo_capabilities` as the live maturity and deployment receipt. Historical
 real-engine results below remain fixture evidence; they do not promote every current
@@ -134,9 +134,11 @@ such a receipt is a bounded residual, not an execution failure or capability pro
   default. Archived Xu evidence passes an independent three-metric reconstruction,
   while the archived Sun summary lacks the width contract. Neither external result
   promotes MCP execution maturity.
-- **Field export (`retchamp`):** RETICOLO V10 `retapod`/`retchamp` crashes on uniform
-  structures with an `imag(apod)` type error. This is an upstream V10 bug; field export
-  is unverified until a workaround or V10 patch is available.
+- **Field export:** the old `imag(apod)` failure came from passing `ef` to RETICOLO's
+  one-argument `retchamp` apodization helper. The corrected bounded `res3` path has one
+  verified uniform-TE artifact with embedded source/config/point/request identities.
+  TM, resonant-mode comparison, paired shared-grid review, and publication claims are
+  not accepted.
 
 ## ⚠ Disk safety
 
@@ -174,7 +176,7 @@ reticolo-mcp/
 │   ├── worker.py        # Detached worker process
 │   ├── convergence.py   # Progressive harmonic convergence
 │   ├── evidence_audit.py # Solver-free archived evidence and claim reconstruction
-│   ├── field_export.py  # retchamp field export
+│   ├── field_export.py  # bounded res3 field export
 │   ├── schema.py        # Pydantic models for materials/geometry
 │   ├── config_hash.py   # Canonical SHA-256 config identity
 │   └── config.py        # Paths, limits, env vars

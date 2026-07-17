@@ -59,7 +59,7 @@ python -m reticolo_mcp.server
 | `reticolo_sweep` | 实验性、默认禁用 | 旧同步扫描；优先使用持久化 job |
 | `job_submit/status/tail/cancel/resume` | 实验性 | 真实 restart/resume 与安全边界 cancel 收据已通过；接口仍为实验性 |
 | `reticolo_convergence` | 实验性 | MCP 执行尚未通过发布验收；外部归档证据不能提升其成熟度 |
-| `reticolo_field_export` | 当前 V10 路径不可用 | 当前 retchamp 基准会失败 |
+| `reticolo_field_export` | 实验性；已验证均匀 TE artifact | 有界 `res3` 导出通过；paired mode comparison 尚未验收 |
 
 实时成熟度和部署身份以 `reticolo_capabilities` 返回值为准。以下真机结果是
 历史基准证据，不会自动把当前所有工具版本提升为“已验证”。
@@ -131,9 +131,10 @@ capability。
 
 - **收敛：** MCP convergence 路径仍为实验性且默认禁用。归档 Xu 证据通过了独立的
   三指标重建；归档 Sun summary 缺少 width 契约。两者都不能提升 MCP 执行成熟度。
-- **场导出（`retchamp`）：** RETICOLO V10 `retapod`/`retchamp` 在均匀结构上因
-  `imag(apod)` 类型错误崩溃。此为 V10 上游 bug，在找到变通方案或 V10 修复前场导出
-  未经验证。
+- **场导出：** 旧 `imag(apod)` 失败来自把 `ef` 传给 RETICOLO 单参数
+  `retchamp` apodization helper。修正后的有界 `res3` 路径已有一个均匀 TE artifact
+  通过真实验收，并嵌入 source/config/point/request 身份。TM、共振模式比较、paired
+  shared-grid review 和 publication claim 均未验收。
 
 ## ⚠ 磁盘安全
 
@@ -170,7 +171,7 @@ reticolo-mcp/
 │   ├── worker.py        # 独立工作进程
 │   ├── convergence.py   # 渐进谐波阶数收敛
 │   ├── evidence_audit.py # 无需求解器的归档证据与 claim 重建
-│   ├── field_export.py  # retchamp 场数据导出
+│   ├── field_export.py  # 有界 res3 场数据导出
 │   ├── schema.py        # Pydantic 材料/几何数据模型
 │   ├── config_hash.py   # 规范 SHA-256 配置标识
 │   └── config.py        # 路径、限制、环境变量
